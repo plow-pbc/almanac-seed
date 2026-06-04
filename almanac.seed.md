@@ -38,31 +38,43 @@
 > straight through with **zero mid-flow surprises** (no "stop, go approve a login", no "stop, go
 > click Connect in a dashboard" surfacing one at a time later).
 
-### 0.0 Interview — ASK the user these FIRST (interactive; not a checklist to skim)
+### 0.0 Interview — ASK only for what the user must DECIDE / PROVIDE up front
 
-> **You are the agent hydrating this seed for a real person. Step 0 is an INTERVIEW, not passive
-> docs: ask each item below, WAIT for the answer/action, CONFIRM it's satisfied — then proceed.
-> Detect what you can yourself (Node, whether `vercel` is installed/logged in); only ask the human
-> for what truly needs them. Do NOT start the build (`## 13.5`) until every box in §0.7 is green.**
-> Ask as one upfront batch, then block on whatever isn't ready:
+> **You are the agent hydrating this seed for a real person. Step 0 is an INTERVIEW: ask each
+> question below, WAIT for the answer/action, CONFIRM it — then proceed. Detect what you can yourself
+> (Node, whether `vercel` is installed/logged in); only ask the human for what truly needs them.
+> ONLY ASK for things the user must decide or provide NOW. Anything they'll do later in the
+> browser/dashboard (e.g. picking the Upstash plan) is an **FYI heads-up, NOT a question** — don't
+> gate the interview on it. Do NOT start the build (`## 13.5`) until every box in §0.7 is green.**
+>
+> ⚠️ **Follow-up limitation (flagged; proper fix pending).** If you are an **agent driven by a remote
+> operator** (not a human at this terminal — e.g. spawned/driven over a queue), do **NOT** block on a
+> terminal-only interactive picker (an **`AskUserQuestion`-style form**): the remote driver can't
+> answer it and the install **hangs on the form**. Ask in **plain text** and accept a plain-text
+> reply. (A non-interactive/headless Step-0 input path is a known TODO.)
 
-1. **Vercel account + login.** Ask: *"Do you have a Vercel account — personal or a Team — and which
-   scope should this deploy go under?"* If `vercel whoami` fails, run `vercel login` and have them
-   approve the device-flow in their browser (§0.2). **Block** until `vercel whoami` succeeds.
-2. **Access passphrase (pick it now).** Ask: *"Choose the passphrase reviewers will sign in with —
-   make it strong; anyone who has it gets in."* Capture it for `ALMANAC_ACCESS_PASSWORD` (§0.5).
-   **Block** until they give one.
-3. **Upstash paid-plan ack.** Ask: *"Creating the Upstash store usually has NO free tier — OK to
-   pick the cheapest paid plan (~$10/mo)?"* (§0.4). **Block** until acknowledged (it's a real cost).
-4. **Host check (you verify — don't just ask).** Run `node -v` (need **≥ 18.17**) and
-   `vercel --version` (install per §0.1 if missing — mind the bare-host `EACCES`). Fix/confirm it
-   yourself; only surface to the user if you can't resolve it.
-5. **(Optional) Google SSO.** Ask: *"Google SSO too, or passphrase-only?"* Passphrase-only is the
-   default and is fully sufficient — skip `GOOGLE_*` unless they want SSO.
+**ASK (must decide/provide now):**
+1. **Vercel account + login.** *"Do you have a Vercel account — personal or a Team — and which scope
+   should this deploy go under?"* If `vercel whoami` fails, run `vercel login` and have them approve
+   the device-flow in their browser (§0.2). **Block** until `vercel whoami` succeeds.
+2. **Access passphrase (pick it now).** *"Choose the passphrase reviewers will sign in with — make it
+   strong; anyone who has it gets in."* Capture it for `ALMANAC_ACCESS_PASSWORD` (§0.5). **Block**
+   until they give one.
+3. **(Optional) Google SSO.** *"Google SSO too, or passphrase-only?"* Passphrase-only is the default
+   and fully sufficient — skip `GOOGLE_*` unless they want SSO.
 
-Persistence is **Upstash for Redis** (KV; no SQL/schema/migration — keyspace created on first
-write). The per-item detail + exact commands are in **§0.1–§0.6**; the gate you must reach before
-building is **§0.7**.
+**VERIFY yourself (don't ask):**
+- **Host check.** Run `node -v` (need **≥ 18.17**) and `vercel --version` (install per §0.1 if
+  missing — mind the bare-host `EACCES`). Fix/confirm it yourself; only surface if you can't resolve.
+
+**FYI heads-up (tell them — do NOT ask/gate on these):**
+- 💸 **Cost:** running this has a **minimum ~$10/month** database cost — **Upstash for Redis has no
+  free tier.** You'll **pick the plan yourself in the Upstash dashboard later** (§0.4); nothing to
+  decide now, just know it's a paid resource.
+- Persistence is **Upstash for Redis** (KV; no SQL/schema/migration — keyspace created on first write).
+
+The per-item detail + exact commands are in **§0.1–§0.6**; the gate you must reach before building is
+**§0.7**.
 
 ### 0.1 Install the Vercel CLI (mind the bare-host `EACCES`)
 
