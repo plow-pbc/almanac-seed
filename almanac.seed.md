@@ -1072,19 +1072,34 @@ Postgres/Supabase, so there is **no SQL schema/migration**). Auth = the **passph
    `printf '%s' "<a strong passphrase>" | vercel env add ALMANAC_ACCESS_PASSWORD production`.
    **Do NOT set `ALMANAC_TEST_LOGIN`** (so the dev bypass 404s in prod). `GOOGLE_*` +
    `ALLOWED_DOMAIN` only if you also want Google SSO.
-5. **Deploy (CLI).** `vercel deploy --prod` → it prints your `https://<project>.vercel.app` URL.
-6. **Set the public URL + redeploy (CLI).**
+5. **Ensure the framework is Next.js (CLI/API — REQUIRED).** If you created the project with
+   bare `vercel project add`, Vercel may not detect the framework and the deploy fails with
+   *"No Output Directory named 'public' found."* Fix: deploy from the app dir via `vercel link`
+   (auto-detects Next from `package.json`/`next.config`), **or** set it explicitly —
+   `PATCH https://api.vercel.com/v9/projects/<prj>?teamId=<team>` body `{"framework":"nextjs"}`.
+6. **Deploy (CLI).** `vercel deploy --prod` → Vercel builds server-side and prints your
+   `https://<project>.vercel.app` URL. (The seed app compiles cleanly; if your build trips a
+   strict type-check, fix the type — do **not** ship `ignoreBuildErrors`.)
+7. **🔓 Turn OFF Vercel Deployment Protection (REQUIRED — or the URL 401s to everyone).** New
+   Vercel projects default to **Vercel Authentication** (`ssoProtection`) which gates the
+   ENTIRE URL behind Vercel SSO — an external visitor gets **401 even on `/login`**, before
+   your app runs. Disable it so the deploy is truly public: Dashboard → project → **Settings →
+   Deployment Protection → Vercel Authentication → Disabled**, **or** via API:
+   `PATCH /v9/projects/<prj>?teamId=<team>` body `{"ssoProtection":null}`. (Your app's own
+   passphrase login is the real gate; Vercel's SSO layer must be off for a public review URL.)
+8. **Set the public URL + redeploy (CLI).**
    `printf '%s' "https://<project>.vercel.app" | vercel env add NEXTAUTH_URL production`, then
    `vercel deploy --prod` again (so NextAuth callbacks resolve to the real host).
-7. **Confirm it's live + public.** From **off your LAN** (phone on cellular, or a server-side
-   fetch): the URL loads `/login`; signing in with the **passphrase** reaches the index; a
-   comment you leave **persists** (reload / second device shows it) — proving the **real
-   Upstash backend**, not in-memory.
+9. **Confirm it's live + public.** From **off your LAN** (phone on cellular, or a server-side
+   fetch): the URL loads `/login` (passphrase field); signing in with the **passphrase**
+   reaches the index; a comment you leave **persists** across a reload / second device —
+   proving the **real Upstash backend**, not in-memory.
 
 **Acceptance (the public deploy is done when):** an external client reaches
 `https://<project>.vercel.app`, logs in via the passphrase, and a left comment survives a
-reload (Upstash-persisted). The only human steps were #1 (Vercel device login) and #3 (the
-Upstash connect click); everything else is the CLI above.
+reload (Upstash-persisted). **Human steps are only:** #1 (Vercel device login) and creating
+the Upstash store in step 3 (the connect itself can be the API call) — everything else
+(framework, deploy, **disable protection**, env, redeploy) is CLI/API above.
 
 ---
 
