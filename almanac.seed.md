@@ -16,6 +16,10 @@
 > emoji (§9, §13) — is **fixed**. Treat those as load-bearing; everything else you may build
 > the idiomatic way.
 >
+> **If a real person is deploying this** (not just a local build/verify), **run `## Step 0` as an
+> interactive interview FIRST** — ask for their Vercel login, the access passphrase, and confirm the
+> host (Node/CLI) before you build anything. (Local dev/verify can skip straight to `## 13.5`.)
+>
 > **Definition of done.** A signed-in `@plow.co` reviewer can open a project, drill into an
 > option and a version, see the rendered HTML artifact in an iframe, drop pin-comments on
 > it, reply, react, resolve, see who else is viewing live, and an AI agent can read the same
@@ -34,21 +38,31 @@
 > straight through with **zero mid-flow surprises** (no "stop, go approve a login", no "stop, go
 > click Connect in a dashboard" surfacing one at a time later).
 
-### 0.0 What you'll need (prerequisites — confirm all before building)
+### 0.0 Interview — ASK the user these FIRST (interactive; not a checklist to skim)
 
-- **A free Vercel account** — Hobby/personal **or** a Team. (Login is a one-time **device-flow you
-  approve in your own browser**, §0.2. Personal and Team differ in one CLI flag — see §0.3.)
-- **Upstash for Redis** — the KV/persistence backend, **provisioned through the Vercel dashboard**
-  (Marketplace). Almanac is a Redis-style KV app — **no SQL, no schema, no migration**; the keyspace
-  is created on first write. **⚠️ Cost heads-up:** creating the store usually has **NO free tier** —
-  you must **select a paid plan (the cheapest, ~$10/mo)**. Know this before you start (it is a real
-  prerequisite, not a free click).
-- **An access passphrase you pick now** — the production, **Google-free** login (§6,
-  `ALMANAC_ACCESS_PASSWORD`). Anyone with it can sign in, so make it strong; this is what you hand
-  reviewers.
-- **A host with Node ≥ 18.17 and the Vercel CLI** (install in §0.1 — mind the bare-host `EACCES`).
-- **(Optional) Google OAuth creds** — only if you also want domain-gated SSO; **not required**, the
-  passphrase covers a public deploy.
+> **You are the agent hydrating this seed for a real person. Step 0 is an INTERVIEW, not passive
+> docs: ask each item below, WAIT for the answer/action, CONFIRM it's satisfied — then proceed.
+> Detect what you can yourself (Node, whether `vercel` is installed/logged in); only ask the human
+> for what truly needs them. Do NOT start the build (`## 13.5`) until every box in §0.7 is green.**
+> Ask as one upfront batch, then block on whatever isn't ready:
+
+1. **Vercel account + login.** Ask: *"Do you have a Vercel account — personal or a Team — and which
+   scope should this deploy go under?"* If `vercel whoami` fails, run `vercel login` and have them
+   approve the device-flow in their browser (§0.2). **Block** until `vercel whoami` succeeds.
+2. **Access passphrase (pick it now).** Ask: *"Choose the passphrase reviewers will sign in with —
+   make it strong; anyone who has it gets in."* Capture it for `ALMANAC_ACCESS_PASSWORD` (§0.5).
+   **Block** until they give one.
+3. **Upstash paid-plan ack.** Ask: *"Creating the Upstash store usually has NO free tier — OK to
+   pick the cheapest paid plan (~$10/mo)?"* (§0.4). **Block** until acknowledged (it's a real cost).
+4. **Host check (you verify — don't just ask).** Run `node -v` (need **≥ 18.17**) and
+   `vercel --version` (install per §0.1 if missing — mind the bare-host `EACCES`). Fix/confirm it
+   yourself; only surface to the user if you can't resolve it.
+5. **(Optional) Google SSO.** Ask: *"Google SSO too, or passphrase-only?"* Passphrase-only is the
+   default and is fully sufficient — skip `GOOGLE_*` unless they want SSO.
+
+Persistence is **Upstash for Redis** (KV; no SQL/schema/migration — keyspace created on first
+write). The per-item detail + exact commands are in **§0.1–§0.6**; the gate you must reach before
+building is **§0.7**.
 
 ### 0.1 Install the Vercel CLI (mind the bare-host `EACCES`)
 
