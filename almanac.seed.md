@@ -548,6 +548,15 @@ regex: **`/^[a-z0-9][a-z0-9-]*$/`**, max 64. HTML upload cap: **3,670,016 bytes 
 
 ### 8.2 Index `/`
 
+**Layout (canonical — every build must match this; the homepage must not diverge).** A normal
+**scrolling content page** inside the centered **`.frame`** (max-width **980px**, `margin:0 auto`,
+`padding:0 24px`; §9.4) — it is **NOT** a full-height `100vh` shell and is **not** vertically
+stretched: the homepage's height is **its content**. Top→bottom: the sticky top bar (§8.1), a
+**`.hero`** ("projects"), the **status pill nav**, then a **dense `.project-list` of `.project-row`s**
+(hairline-separated, compact rhythm — §9.4). Never wrap this page in a `min-height:100vh`/flex shell
+and never put height on `html`/`body` for it (that's the homepage regression — full-height is
+viewer/login only, §8.4/§9.4).
+
 - Hero `projects`. A **status-filter pill nav** (`active` | `archived` | `shipped`), default
   `active`; non-active statuses link to `/?status=<s>`. A **"+ new project"** button opening
   the New Project modal. *(Casing, per the real: mono labels render **uppercase** — the brand
@@ -592,10 +601,14 @@ events, display names, and the version-switcher entries.
 allow-scripts"`, **fluid** so the seed's own media queries fire against its real rendered
 viewport (no CSS transform / no fixed 1280px inner width).
 
-**Fill rule (apply ALL FOUR — do not partially apply):**
+**Fill rule (apply ALL FOUR — do not partially apply). This full-height treatment is SCOPED TO
+THIS VIEWER ROUTE ONLY** — the index/project pages flow naturally (§8.2/§8.3, §9.4); do **not**
+hoist any of this to `html`/`body`/a global shell (that regresses the homepage):
 
 ```css
-.iframe-wrap   { position: relative; flex: 1 1 auto; min-height: 0; }  /* the containing block */
+.viewer        { height: 100vh; height: 100dvh; display: flex; flex-direction: column;
+                 overflow: hidden; }                                  /* VIEWER PAGE container — this route only */
+.iframe-wrap   { position: relative; flex: 1 1 auto; min-height: 0; } /* the containing block */
 .viewer-iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 ```
 
@@ -605,8 +618,15 @@ does **not** stretch to fill `inset:0` — with no explicit size it falls back t
 anchor it to the wrap and give it a definite containing block) **and** `width:100%; height:100%` (to
 size the replaced element to that block). The wrap must be `position:relative` (so `inset:0`/`100%`
 resolve against *it*) and `flex:1 1 auto; min-height:0` (so it actually takes the remaining column
-height instead of collapsing). **Dropping `height:100%` because `inset:0` "looks sufficient" is the
-exact v3 mistake — it reverts the iframe to 150px.** All four properties are mandatory together.
+height instead of collapsing). **Dropping `height:100%` because `inset:0` "looks sufficient" reverts
+the iframe to 150px.** All four properties are mandatory together.
+
+**Use DEFINITE `height:100vh` on `.viewer`, not `min-height` (proven refinement).** With the iframe
+absolutely positioned, `min-height:100vh` on the column can resolve the `flex:1` `.iframe-wrap` to
+**0 on the first layout pass after a client-side nav** (an intermittent collapse). A definite
+`height:100vh`/`100dvh` + `overflow:hidden` makes the available height deterministic (`= 100vh −
+version-bar`) on every paint. **This `.viewer` container is the ONLY full-height shell** — it lives
+on the viewer route, never on `html`/`body`/a wrapping app-shell.
 
 **Pin layer** (injected into the iframe document, plain DOM — not React). The pins are an
 **overlay drawn into the seed's iframe document**: absolutely-positioned numbered markers,
@@ -936,16 +956,19 @@ the **base** so the rounded outline survives in every state:
 
 ### 9.4 Geometry, spacing & shadows
 
-- **Full-height chain (REQUIRED — every page fills the viewport).** Set `html, body { height: 100%; }`
-  (`margin:0`), and the **top-level container of EVERY route** (index list, project, option/version
-  viewer, login, welcome) must establish **`min-height: 100vh`** (`100dvh` on mobile) as a
-  **flex column** so the background and layout stretch to the full screen. The sticky top bar sits
-  at the top and a **`flex: 1`** content region fills the remaining height (the viewer's iframe
-  region already uses `flex: 1 1 auto; min-height: 0`). **Without this the body collapses to content
-  height and the page renders in only the top ~10–20% of the viewport with empty space below** — a
-  real bug we shipped: `html, body` had no `height` and the index's `.frame` wrapper had no
-  `min-height`, while only `.login-wrap`/`.viewer` set `100vh`. The whole app shell, not just two
-  routes, must carry the full-height chain.
+- **Page height — SCOPED to the viewer; content pages flow naturally (do NOT force a global shell).**
+  **Do not** apply a global `html, body { height: 100% }` + `min-height: 100vh` flex shell to every
+  route — that **over-reaches and distorts the content pages.** The **index `/` (§8.2)** and
+  **project page (§8.3)** render exactly as the seed describes — **natural top-down flow inside the
+  centered `.frame`** (hero, pill nav, compact hairline-separated rows); their height is their
+  **content**, and the sticky top bar + chalk background already cover the page. No full-height
+  wrapper, no `flex:1` stretch on these. **Only two surfaces are full-height:** the **VersionViewer
+  (§8.4)** — a `min-height:100vh`/`100dvh` flex column so its artifact iframe can fill (see §8.4
+  fill rule) — and the centered **login** card (`.login-wrap { min-height:100vh; display:flex;
+  align/justify center }`). `html, body` need only `margin:0` + the base background — **no global
+  `height:100%`/`100vh`.** *(Regression guardrail: a global height-shell once fixed the preview
+  iframe but broke the homepage layout. Keep full-height scoped to the viewer/login; never globalize
+  it.)*
 - **Radius**: `--radius-sm 4px` (crumbs, kbd, small chips) · `--radius 8px` (inputs) ·
   `--radius-lg 12px` (cards, popovers, modals) · **`999px`** for all pills/buttons/avatars.
 - **Borders**: hairlines use `--rule`; cards `--card-border`; emphasized `--card-border-deep`
