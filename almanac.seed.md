@@ -399,7 +399,7 @@ triplets; it does **not** delete legacy keys.
   - **Active iff `ALMANAC_ACCESS_PASSWORD` is set** (a strong secret in the deploy env). When
     it's unset, the provider is not offered (dev relies on `test-login`; a Google-only deploy
     ignores it).
-  - **`/login` renders a passphrase field** (a "name" field too, optional — see identity
+  - **`/login` renders a passphrase field + a REQUIRED display-name field** (see identity
     below) whenever the provider is active, **in addition to** the Google button when
     `GOOGLE_*` is configured. With neither Google nor passphrase configured, only `test-login`
     (dev) can sign in.
@@ -407,10 +407,17 @@ triplets; it does **not** delete legacy keys.
     **constant-time** (timing-safe; reject on mismatch). On success, return a session identity
     and mint the **same NextAuth JWT** (signed with `NEXTAUTH_SECRET`) the rest of the app
     already consumes — so middleware/`readIdentity`/pins all work unchanged.
-  - **Identity for passphrase sessions**: the login form takes an optional **display name**;
-    the session is `{ name: <entered name or "Reviewer">, email: <slug(name)>@<ALMANAC_IDENTITY_DOMAIN
-    or "almanac.local"> }`. This keeps per-reviewer comment attribution while staying a single
-    shared-secret gate. (Avatars fall back to deterministic initials — no Google image.)
+  - **Identity for passphrase sessions — display name is REQUIRED**: the login form has a
+    **required display-name field** — label carries **no "optional"** (e.g. *"Your name"*),
+    placeholder e.g. *"Your name"*, helper text *"so your comments are attributed to you"*. The
+    form **cannot be submitted with a blank name**: client-side validation blocks/disables submit
+    on an empty or whitespace-only name, **and** the `authorize` callback **rejects** the sign-in
+    when the name is missing/blank — even with a correct passphrase. On success the session is
+    `{ name: <entered name>, email: <slug(name)>@<ALMANAC_IDENTITY_DOMAIN or "almanac.local"> }`:
+    the **entered name is the real identity** used for comment authorship, the activity feed, and
+    the top-bar pill — there is **no `"Reviewer"`/anonymous default** anymore. The passphrase
+    stays the gate; the name is a required identity on top, so every comment is attributed to a
+    real person. (Avatars fall back to deterministic initials from the name — no Google image.)
   - **`ALLOWED_DOMAIN` becomes env-configurable** (default `plow.co`): it gates **Google**
     sign-ins only. The passphrase provider is **not** domain-gated (anyone with the secret is
     in) — that's the whole point of a self-contained public deploy. Set `ALLOWED_DOMAIN` to
@@ -1225,13 +1232,15 @@ Postgres/Supabase, so there is **no SQL schema/migration**). Auth = the **passph
    `printf '%s' "https://<project>.vercel.app" | vercel env add NEXTAUTH_URL production`, then
    `vercel deploy --prod` again (so NextAuth callbacks resolve to the real host).
 9. **Confirm it's live + public.** From **off your LAN** (phone on cellular, or a server-side
-   fetch): the URL loads `/login` (passphrase field); signing in with the **passphrase**
-   reaches the index; a comment you leave **persists** across a reload / second device —
-   proving the **real Upstash backend**, not in-memory.
+   fetch): the URL loads `/login` (passphrase field **+ required name field**); signing in with
+   your **name + passphrase** reaches the index; a comment you leave is **attributed to that
+   name** and **persists** across a reload / second device — proving the **real Upstash backend**,
+   not in-memory. (A blank name must be refused at `/login`.)
 
 **Acceptance (the public deploy is done when):** an external client reaches
-`https://<project>.vercel.app`, logs in via the passphrase, and a left comment survives a
-reload (Upstash-persisted). **Human steps are only:** #1 (Vercel device login) and creating
+`https://<project>.vercel.app`, logs in via **name + passphrase** (a blank name is refused), and a
+left comment — **attributed to that entered name** — survives a reload (Upstash-persisted).
+**Human steps are only:** #1 (Vercel device login) and creating
 the Upstash store in step 3 (the connect itself can be the API call) — everything else
 (framework, deploy, **disable protection**, env, redeploy) is CLI/API above.
 
@@ -1308,8 +1317,11 @@ Each states an action and the observable expected result. Manual or headless (Pl
 1. **Auth gate.** Hit `/` with no session. *Expect:* redirect to `/login?next=/`, and `/login`
    renders a **sign-in card** with whatever providers are configured — the **passphrase field**
    (when `ALMANAC_ACCESS_PASSWORD` is set) and/or the **Google button** (when `GOOGLE_*` is set).
-   (In dev `## Verify` signs in via `test-login`; the Google domain-rejection copy "Almanac is
-   only for @plow.co accounts" appears only when Google is the configured provider.)
+   When the passphrase provider is shown it includes a **REQUIRED display-name field** (label has
+   no "optional"; helper *"so your comments are attributed to you"*) and **submitting with a blank
+   name is blocked** (and rejected server-side even with a correct passphrase). (In dev `## Verify`
+   signs in via `test-login`, which carries its own `name`; the Google domain-rejection copy
+   "Almanac is only for @plow.co accounts" appears only when Google is the configured provider.)
 2. **Index list + status filter.** Signed in, open `/`. *Expect:* at least one project row
    (`<N> options · <M> pins`, "updated …"); clicking `archived`/`shipped` pills re-filters;
    default is `active`.
