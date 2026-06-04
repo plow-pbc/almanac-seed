@@ -31,12 +31,13 @@
 
 ## Step 0 — Prerequisites & one-time setup (DO THIS FIRST)
 
-> **Front-load every human touch.** Hydrating the app (`## 13.5 Steps`) is fully automated, and
-> the public deploy (`## 13.6`) is CLI/API **except two unavoidable browser actions** — a Vercel
-> device-login and creating the Upstash store. **Clear both of those, plus the passphrase, NOW,
-> before you build anything.** Do this section first and the entire hydrate → build → deploy run
-> straight through with **zero mid-flow surprises** (no "stop, go approve a login", no "stop, go
-> click Connect in a dashboard" surfacing one at a time later).
+> **Front-load EVERY human touch into Step 0.** There are exactly **two** human gates for the whole
+> deploy — (1) the **Vercel device-login** (§0.2) and (2) **creating the Upstash store** in the
+> dashboard (§0.4). **Do both HERE, now, before you build anything.** The access **passphrase is NOT
+> a human decision** — the agent **auto-generates** it (§0.5) and **tells the user at the end**. After
+> Step 0, `## 13.5` (hydrate/build) and `## 13.6` (deploy) run **fully automated, CLI/API only, all
+> the way to the live public URL with ZERO further interruptions** — no "stop, go approve a login",
+> no "stop, go create a database", no "stop, pick a passphrase".
 
 ### 0.0 Interview — ASK only for what the user must DECIDE / PROVIDE up front
 
@@ -57,20 +58,20 @@
 1. **Vercel account + login.** *"Do you have a Vercel account — personal or a Team — and which scope
    should this deploy go under?"* If `vercel whoami` fails, run `vercel login` and have them approve
    the device-flow in their browser (§0.2). **Block** until `vercel whoami` succeeds.
-2. **Access passphrase (pick it now).** *"Choose the passphrase reviewers will sign in with — make it
-   strong; anyone who has it gets in."* Capture it for `ALMANAC_ACCESS_PASSWORD` (§0.5). **Block**
-   until they give one.
-3. **(Optional) Google SSO.** *"Google SSO too, or passphrase-only?"* Passphrase-only is the default
+2. **(Optional) Google SSO.** *"Google SSO too, or passphrase-only?"* Passphrase-only is the default
    and fully sufficient — skip `GOOGLE_*` unless they want SSO.
+
+> **Do NOT ask for the access passphrase.** The agent **auto-generates** a strong one (§0.5) and
+> **reports it to the user at the very end** with the live URL — the human never picks or types it.
 
 **VERIFY yourself (don't ask):**
 - **Host check.** Run `node -v` (need **≥ 18.17**) and `vercel --version` (install per §0.1 if
   missing — mind the bare-host `EACCES`). Fix/confirm it yourself; only surface if you can't resolve.
 
 **FYI heads-up (tell them — do NOT ask/gate on these):**
-- 💸 **Cost:** running this has a **minimum ~$10/month** database cost — **Upstash for Redis has no
-  free tier.** You'll **pick the plan yourself in the Upstash dashboard later** (§0.4); nothing to
-  decide now, just know it's a paid resource.
+- 💸 **Cost:** your **first Upstash database is FREE** — Upstash has a free tier, so a fresh account
+  pays **nothing** to run this. A paid plan (~$10/mo) is only relevant if you **already** have an
+  Upstash DB on the account and this would be an additional one. First-time setup = **no cost**.
 - Persistence is **Upstash for Redis** (KV; no SQL/schema/migration — keyspace created on first write).
 
 The per-item detail + exact commands are in **§0.1–§0.6**; the gate you must reach before building is
@@ -102,9 +103,11 @@ It prints a device URL like `https://vercel.com/oauth/device?user_code=XXXX-XXXX
 `~/Library/Application Support/com.vercel.cli/auth.json` (macOS) or
 `~/.local/share/com.vercel.cli/auth.json` (Linux).
 
-### 0.3 Create the Vercel project (personal-vs-Team **scope gotcha**)
+### 0.3 Create the Vercel project — NOW (the Upstash store attaches to it)
 
-You'll `vercel link` from the hydrated app dir; create the project now or at deploy. The scope flag
+**Create the project in Step 0**, not at deploy — the Upstash store (§0.4) **attaches to this
+project**, so it must exist first. `vercel link` from the directory where you'll build the app (an
+empty dir is fine — the project is created now; framework is detected at deploy). The scope flag
 differs by account type:
 
 - **Team account:** `vercel link --yes --project <your-almanac> --scope <your-team>`
@@ -117,15 +120,19 @@ differs by account type:
 > project via API, also set `framework: "nextjs"` (§13.6 step 5) or the deploy fails with
 > *"No Output Directory named 'public' found."*
 
-### 0.4 🧑 Provision + connect Upstash Redis (Vercel dashboard) — **HUMAN STEP #2**
+### 0.4 🧑 Create + connect the Upstash store — NOW, in Step 0 (Vercel dashboard) — **HUMAN STEP #2**
 
-In the Vercel dashboard, do the **exact clicks** — creating a **NEW store dedicated to THIS
-project**:
+**Do this up front in Step 0** (not at deploy) so every human gate is cleared before the build. In
+the Vercel dashboard, the **exact clicks** — a **NEW store dedicated to THIS project**:
 
 1. Your project → **Storage** → **Create Database** → **"Upstash for Redis"** (Marketplace) →
-   **select a plan** — the **cheapest available (~$10/mo); there is often NO free tier**, so you
-   must pick a paid plan → **Create** (region is auto-assigned) → **Connect**.
+   **pick a plan** — the **FREE tier is fine for a first database (no cost)**; only choose a paid
+   plan if you already have an Upstash DB → **Create** (region is auto-assigned) → **Connect**.
 2. **Connect Project** → select **`<your-almanac>`** → **All Environments** → **Connect**.
+
+Creating the store **now, empty, before the app is built is fine** — there's no schema and the
+keyspace appears on **first write**, so an empty store just sits ready until the deployed app writes
+to it.
 
 > **⚠️ ONE store per deploy — NEVER share an Upstash store between two Almanacs.** Create a
 > **fresh, dedicated** store here; do **not** connect a store that another Almanac project already
@@ -136,25 +143,33 @@ project**:
 > two faithful builds can't diverge — but the rule is still one dedicated store each.)
 
 This **auto-injects** `KV_REST_API_URL` + `KV_REST_API_TOKEN` (+ `KV_URL`, `REDIS_URL`,
-`KV_REST_API_READ_ONLY_TOKEN`) into the project across all environments — confirm later with
-`vercel env ls`. No SQL/schema; the keyspace appears on first write. (A no-browser CLI/API path for
-*just the connect* exists in §13.6 step 3, but **store creation itself is this dashboard step**.)
+`KV_REST_API_READ_ONLY_TOKEN`) into the project across all environments — confirm with
+`vercel env ls`. **Store creation is a browser step, so do it here in Step 0.** (If you'd rather not
+click for the *connect*: create the store in the dashboard, then connect via the Vercel REST API —
+`POST /v1/storage/stores/<storeId>/connections?teamId=<team>` body
+`{"projectId":"<prj_…>","envVarEnvironments":["production","preview","development"]}`, ids from
+`GET /v1/storage/stores` + `GET /v9/projects/<name>`. Either way: done in Step 0, not at deploy.)
 
-### 0.5 Pick the passphrase + set prod secrets (up front)
+### 0.5 Auto-generate the passphrase + set prod secrets (the AGENT does this — no user input)
 
-Choose your passphrase now, then set the production env so the deploy is clean:
+The **agent generates a strong passphrase itself** — the user never picks or types one — then sets
+the production env:
 
 ```bash
+PASSPHRASE="$(openssl rand -base64 18)"   # agent-generated; SAVE it to report to the user at the end
 printf '%s' "$(openssl rand -base64 32)" | vercel env add NEXTAUTH_SECRET production
-printf '%s' "<your-chosen-passphrase>"   | vercel env add ALMANAC_ACCESS_PASSWORD production
+printf '%s' "$PASSPHRASE"                 | vercel env add ALMANAC_ACCESS_PASSWORD production
 ```
+
+**Record `$PASSPHRASE`** — you (the agent) hand it to the user **with the live URL at the very end**
+(§13.6 final step); they sign in with **any name + this passphrase**.
 
 - **Do NOT set `ALMANAC_TEST_LOGIN`** — leaving it unset keeps the dev sign-in bypass **404'd** in
   prod (the passphrase is the only public login).
 - `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` + `ALLOWED_DOMAIN` **only** if you also want Google SSO.
-- **One value can't be known yet:** `NEXTAUTH_URL` — it's your deploy URL, which Vercel only prints
-  after the first `vercel deploy --prod`. Set it **right after** the first deploy (§13.6 step 8) and
-  redeploy once. That single post-deploy step is **expected**, not a surprise.
+- **One value can't be known yet:** `NEXTAUTH_URL` — your deploy URL, which Vercel only prints after
+  the first `vercel deploy --prod`. Set it right after the first deploy (§13.6) and redeploy once —
+  automated, expected.
 
 ### 0.6 Deployment Protection will need turning OFF (know it now)
 
@@ -170,13 +185,14 @@ own passphrase is the real gate.
 - [ ] `vercel login` approved in browser (🧑 #1)
 - [ ] Project created with the **correct scope** (omit `--scope` on personal)
 - [ ] Upstash store **created + connected → All Environments** (🧑 #2); `KV_REST_API_*` present
-- [ ] Passphrase chosen → `ALMANAC_ACCESS_PASSWORD` + `NEXTAUTH_SECRET` set (production)
+- [ ] Passphrase **auto-generated by the agent** → `ALMANAC_ACCESS_PASSWORD` + `NEXTAUTH_SECRET` set
+  (production); the agent **saved the passphrase** to report at the end
 - [ ] `ALMANAC_TEST_LOGIN` left **unset**
-- [ ] Aware `NEXTAUTH_URL` is set once post-first-deploy, and Deployment Protection gets disabled
+- [ ] Aware `NEXTAUTH_URL` is set once post-first-deploy, and Deployment Protection gets disabled (both automated)
 
-With every box checked, run `## 13.5 Steps` (hydrate/build) then `## 13.6 Deploy` — they execute
-**CLI/API-only, no further human interruptions**, ending at a live public URL you log into with your
-passphrase.
+The only two human gates are 🧑 #1 (login) + 🧑 #2 (store). With every box checked, run `## 13.5 Steps`
+(hydrate/build) then `## 13.6 Deploy` — they execute **CLI/API-only, no further human interruptions**,
+ending at a live public URL; the agent then reports that URL + the generated passphrase to the user.
 
 ---
 
@@ -1293,79 +1309,53 @@ Local build/verify proves the app; this section makes it a **real, public, secur
 that anyone reaches from outside your LAN — with YOUR OWN accounts/keys, no `plow` anything.**
 Backend = **Upstash Redis** (Vercel KV is Upstash; Almanac is a Redis-style KV app — **not**
 Postgres/Supabase, so there is **no SQL schema/migration**). Auth = the **passphrase login**
-(§6). Most steps are CLI; exactly **two are unavoidable human browser actions** (marked 🧑).
+(§6). **All human steps were completed in Step 0** (Vercel login §0.2, Upstash store create+connect
+§0.4, agent-generated secrets §0.5). **This section has NO human/browser steps — it is fully
+automated CLI/API** from the built app to a live public URL, then the agent reports the URL +
+passphrase to the user.
 
-> Prereqs: a free **Vercel** account; the app hydrated locally (`## Steps`); and the **Vercel
-> CLI installed** — `npm i -g vercel` (the bare host has no `vercel` binary).
->
-> **Account note:** the REST/API calls below take `?teamId=<team>`. That's for a **Team**
-> account — on a **personal/free** account there is **no team**, so **omit `?teamId=` entirely**
-> (and use your username as `<scope>`). The CLI auth token lives at
-> `~/Library/Application Support/com.vercel.cli/auth.json` on **macOS** and
-> `~/.local/share/com.vercel.cli/auth.json` on **Linux**. The dashboard path works for every
-> step if you'd rather click than curl.
+> **Account note:** the REST/API calls below take `?teamId=<team>` on a **Team** account; on a
+> **personal** account **omit `?teamId=` entirely** (use your username as `<scope>`). The CLI auth
+> token lives at `~/Library/Application Support/com.vercel.cli/auth.json` (macOS) /
+> `~/.local/share/com.vercel.cli/auth.json` (Linux).
 
-1. **🧑 Vercel login (browser).** Run `vercel login`. It prints a device URL like
-   `https://vercel.com/oauth/device?user_code=XXXX-XXXX` and waits. **You** open that URL and
-   click **Confirm** (pick your team/scope). One click; the CLI then proceeds authenticated.
-2. **Link/create the project (CLI).** `vercel link --yes --project <your-almanac> --scope <your-scope>`
-   (creates the Vercel project).
-3. **Provision Upstash Redis — a NEW, DEDICATED store for THIS project** (no SQL/schema — the
-   Redis keyspace is created on first write). **⚠️ NEVER connect a store another Almanac already
-   uses:** two Almanacs sharing one store collide on identical key names (e.g. `manual:projects`)
-   and the index throws **`UpstashError: WRONGTYPE … ["lrange","manual:projects",…]` → HTTP 500**
-   as soon as one app wrote a key as a different Redis type than another reads it. **One deploy =
-   one store.** Two ways to create + connect:
-   - **🧑 Dashboard (simplest):** your project → **Storage → Create Database → "Upstash for
-     Redis" (Marketplace) → select a plan (cheapest available, ~$10/mo — often NO free tier, so a
-     paid plan is required) → Create (region auto) → Connect**, then **Connect Project → select
-     `<your-almanac>` → All Environments → Connect.**
-   - **CLI/API (no browser click for the connect — verified):** create a **fresh, dedicated**
-     store in the dashboard (**do NOT reuse a store already connected to another Almanac** — that
-     is the WRONGTYPE footgun above), then connect it to the project via the Vercel REST
-     API — the endpoint the dashboard button calls, which the `vercel` CLI does *not* expose
-     (`integration-resource` only disconnects/removes). With your CLI token
-     (`~/Library/Application Support/com.vercel.cli/auth.json`) and `teamId`/`storeId`/`projectId`:
-     `POST https://api.vercel.com/v1/storage/stores/<storeId>/connections?teamId=<team>`
-     with body `{"projectId":"<prj_…>","envVarEnvironments":["production","preview","development"]}`.
-     (Find ids via `GET /v1/storage/stores?teamId=…` and `GET /v9/projects/<name>?teamId=…`.)
-   Either way it **auto-injects `KV_REST_API_URL` + `KV_REST_API_TOKEN`** (+`KV_URL`,`REDIS_URL`,
-   `KV_REST_API_READ_ONLY_TOKEN`). Confirm with `vercel env ls`.
-4. **Set the remaining prod env (CLI).** Generate + set, e.g.:
-   `printf '%s' "$(openssl rand -base64 32)" | vercel env add NEXTAUTH_SECRET production`;
-   `printf '%s' "<a strong passphrase>" | vercel env add ALMANAC_ACCESS_PASSWORD production`.
-   **Do NOT set `ALMANAC_TEST_LOGIN`** (so the dev bypass 404s in prod). `GOOGLE_*` +
-   `ALLOWED_DOMAIN` only if you also want Google SSO.
-5. **Ensure the framework is Next.js (CLI/API — REQUIRED).** If you created the project with
-   bare `vercel project add`, Vercel may not detect the framework and the deploy fails with
-   *"No Output Directory named 'public' found."* Fix: deploy from the app dir via `vercel link`
+1. **Confirm Step-0 state (CLI).** `vercel whoami` is authed, and `vercel env ls` shows
+   `KV_REST_API_URL` + `KV_REST_API_TOKEN` (the Step-0 Upstash store), `NEXTAUTH_SECRET`, and
+   `ALMANAC_ACCESS_PASSWORD` (the agent-generated passphrase from §0.5); `ALMANAC_TEST_LOGIN` is
+   **absent**. If the store/env is missing, Step 0 §0.4/§0.5 wasn't done — go back and do it there;
+   **do not create a store mid-deploy** (that's the gate Step 0 exists to front-load).
+2. **Ensure the framework is Next.js (CLI/API — REQUIRED).** Deploy from the app dir via `vercel link`
    (auto-detects Next from `package.json`/`next.config`), **or** set it explicitly —
-   `PATCH https://api.vercel.com/v9/projects/<prj>?teamId=<team>` body `{"framework":"nextjs"}`.
-6. **Deploy (CLI).** `vercel deploy --prod` → Vercel builds server-side and prints your
-   `https://<project>.vercel.app` URL. (The seed app compiles cleanly; if your build trips a
-   strict type-check, fix the type — do **not** ship `ignoreBuildErrors`.)
-7. **🔓 Turn OFF Vercel Deployment Protection (REQUIRED — or the URL 401s to everyone).** New
-   Vercel projects default to **Vercel Authentication** (`ssoProtection`) which gates the
-   ENTIRE URL behind Vercel SSO — an external visitor gets **401 even on `/login`**, before
-   your app runs. Disable it so the deploy is truly public: Dashboard → project → **Settings →
-   Deployment Protection → Vercel Authentication → Disabled**, **or** via API:
-   `PATCH /v9/projects/<prj>?teamId=<team>` body `{"ssoProtection":null}`. (Your app's own
-   passphrase login is the real gate; Vercel's SSO layer must be off for a public review URL.)
-8. **Set the public URL + redeploy (CLI).**
+   `PATCH https://api.vercel.com/v9/projects/<prj>?teamId=<team>` body `{"framework":"nextjs"}` — else
+   the deploy fails with *"No Output Directory named 'public' found."*
+3. **Deploy (CLI).** `vercel deploy --prod` → Vercel builds server-side and prints your
+   `https://<project>.vercel.app` URL. (The seed app compiles cleanly; if a strict type-check trips,
+   fix the type — do **not** ship `ignoreBuildErrors`.)
+4. **Disable Vercel Deployment Protection (API — REQUIRED, no browser).** New Vercel projects default
+   to **Vercel Authentication** (`ssoProtection`) which 401s the **ENTIRE** URL — even `/login` —
+   before your app runs. Turn it off via API (no click): `PATCH /v9/projects/<prj>?teamId=<team>` body
+   `{"ssoProtection":null}`. (Dashboard → Settings → Deployment Protection → Disabled also works.)
+   Your app's passphrase login is the real gate.
+5. **Set the public URL + redeploy (CLI).**
    `printf '%s' "https://<project>.vercel.app" | vercel env add NEXTAUTH_URL production`, then
-   `vercel deploy --prod` again (so NextAuth callbacks resolve to the real host).
-9. **Confirm it's live + public.** From **off your LAN** (phone on cellular, or a server-side
-   fetch): the URL loads `/login` (passphrase field **+ required name field**); signing in with
-   your **name + passphrase** reaches the index; a comment you leave is **attributed to that
-   name** and **persists** across a reload / second device — proving the **real Upstash backend**,
-   not in-memory. (A blank name must be refused at `/login`.)
+   `vercel deploy --prod` again (so NextAuth callbacks resolve to the real host). `NEXTAUTH_URL` is the
+   one value not knowable until the first deploy — expected, still fully automated.
+6. **Confirm it's live + public.** From **off your LAN** (server-side fetch / cellular): the URL loads
+   `/login` (passphrase field **+ required name field**); **any name + the generated passphrase**
+   reaches the index; a comment you leave is **attributed to that name** and **persists** across a
+   reload / second device — proving the **real Upstash backend**, not in-memory. (A blank name must be
+   refused at `/login`.)
+7. **🗣️ Report to the user (final step — the one thing they hear from you).** Deliver, once, with the URL:
+   > *"Your Almanac is live at **`https://<project>.vercel.app`**. To give reviewers access, share this
+   > passphrase: **`<the §0.5 generated passphrase>`**. They sign in with **any name + this passphrase**."*
+   The user never picked the passphrase — you generated it in §0.5 and hand it over here with the URL.
 
 **Acceptance (the public deploy is done when):** an external client reaches
-`https://<project>.vercel.app`, logs in via **name + passphrase** (a blank name is refused), and a
-left comment — **attributed to that entered name** — survives a reload (Upstash-persisted).
-**Human steps are only:** #1 (Vercel device login) and creating
-the Upstash store in step 3 (the connect itself can be the API call) — everything else
-(framework, deploy, **disable protection**, env, redeploy) is CLI/API above.
+`https://<project>.vercel.app`, logs in via **any name + the generated passphrase** (a blank name is
+refused), and a left comment — **attributed to that name** — survives a reload (Upstash-persisted).
+**The only human steps were Step 0's two gates** (Vercel login + Upstash store create+connect);
+everything in §13.6 (framework, deploy, **disable protection**, `NEXTAUTH_URL`, redeploy, and the
+final report) is automated CLI/API.
 
 ---
 
