@@ -330,48 +330,54 @@ triplets; it does **not** delete legacy keys.
 > The per-key type annotations below are authoritative. Storage model is unchanged — **one
 > dedicated store per deploy** (own-store-per-stranger, §0.4/§13.6); a store is never shared.
 >
-> **Optional hardening (NOT required).** The `kv.ts` wrapper MAY additionally catch a stray
-> `UpstashError: WRONGTYPE` on reads and return the type's safe default (`[]` / `null` / `{}`) —
-> optionally `del`+retry so a foreign/legacy key self-heals — degrading instead of 500-ing. With the
-> physical types pinned above this cannot arise from the app's own writes, so it's belt-and-suspenders
-> only, not a requirement.
+> **Recommended hardening (KV-read resilience).** The `kv.ts` wrapper SHOULD catch a stray
+> `UpstashError: WRONGTYPE` (and any read error) and return the type's **safe default**
+> (`[]` for list reads, `null` for `get`, `{}`/`{}` for hash, empty set) — optionally `del`+retry so a
+> foreign/legacy key self-heals — so one bad key **degrades to empty instead of 500-ing the whole
+> page**. With the physical types pinned above this won't arise from the app's own writes; it's the
+> safety net for legacy/foreign data, not a substitute for pinning the types.
 
-**Comments / replies / reactions / resolve** *(physical types per the legend above)*
-- `comment:<id>` → **STRING** (Comment JSON)
-- `version:<p>:<o>:<v>:comments` → **native LIST** of comment ids (RPUSH order = pin order)
-- `version:<p>:<v>:comments` → **legacy** 2-level **native LIST** (read-fallback for v1)
-- `comment:<id>:replies` → **native LIST** of reply ids
-- `reply:<id>` → **STRING** (Reply JSON)
-- `comment:<id>:reactions` / `reply:<id>:reactions` → **native HASH** `{ emoji: count }`
-- `comment:<id>:reactions:<e>:users` / `reply:<id>:reactions:<e>:users` → **native SET** of userIds
-- `comment:<id>:resolved` → **STRING** (`{ by, at } | null` JSON)
-- `version:<p>:<o>:<v>:resolved` → **native SET** of resolved comment ids (+ legacy `version:<p>:<v>:resolved`)
+**Comments / replies / reactions / resolve** *(physical type + ops fixed per key)*
+- `comment:<id>` → **STRING** — `SET`/`GET` of `JSON.stringify(Comment)`
+- `version:<p>:<o>:<v>:comments` → **native LIST** of comment ids — `RPUSH`/`LRANGE`/`LREM` (RPUSH order = pin order)
+- `version:<p>:<v>:comments` → **legacy** 2-level **native LIST** — `RPUSH`/`LRANGE` (read-fallback for v1)
+- `comment:<id>:replies` → **native LIST** of reply ids — `RPUSH`/`LRANGE`/`LREM`
+- `reply:<id>` → **STRING** — `SET`/`GET` of `JSON.stringify(Reply)`
+- `comment:<id>:reactions` / `reply:<id>:reactions` → **native HASH** `{ emoji: count }` — `HINCRBY`/`HGETALL`/`HDEL`
+- `comment:<id>:reactions:<e>:users` / `reply:<id>:reactions:<e>:users` → **native SET** of userIds — `SADD`/`SREM`/`SISMEMBER`/`SMEMBERS`
+- `comment:<id>:resolved` → **STRING** — `SET`/`GET` of `{ by, at } | null` JSON (`DEL` to clear)
+- `version:<p>:<o>:<v>:resolved` → **native SET** of resolved comment ids — `SADD`/`SREM`/`SISMEMBER`/`SMEMBERS` (+ legacy `version:<p>:<v>:resolved`)
 
-**Presence / display names / status / per-user** *(physical types per the legend above)*
-- `version:<p>:<o>:<v>:viewers` → **native HASH** — field = email, value = **STRING (ViewerJSON)**
-  (+ legacy `version:<p>:<v>:viewers`)
+**Presence / display names / status / per-user** *(physical type + ops fixed per key)*
+- `version:<p>:<o>:<v>:viewers` → **native HASH** — field = email, value = `JSON.stringify(Viewer)`
+  STRING — `HSET`/`HGETALL`/`HDEL` (+ legacy `version:<p>:<v>:viewers`)
 - `project:<p>:displayName`, `project:<p>:option:<o>:displayName`,
-  `version:<p>:<o>:<v>:displayName` → **STRING** each (+ legacy `version:<p>:<v>:displayName`)
-- `project:<p>:status` → **STRING** (status override)
-- `user:<userId>` → **STRING** (display-name; legacy; userId now = lowercased email)
+  `version:<p>:<o>:<v>:displayName` → **STRING** each — `SET`/`GET` (+ legacy `version:<p>:<v>:displayName`)
+- `project:<p>:status` → **STRING** (status override) — `SET`/`GET`
+- `user:<userId>` → **STRING** (display-name; legacy; userId now = lowercased email) — `SET`/`GET`
 
 **Manual project (legacy mirror shape)**
-- `manual:projects` → **native LIST of slugs** — `RPUSH`/`LREM`/`LRANGE`; **never `SET`/`GET` as a
-  JSON string** (the string-vs-LIST divergence between two faithful builds is the exact `WRONGTYPE`).
-- `manual:project:<slug>:meta` → **STRING (JSON)**
-- `manual:project:<slug>:versions` → **native LIST** (version ids)
-- `manual:project:<slug>:version:<vid>:meta` → **STRING (JSON)**
-- `manual:project:<slug>:version:<vid>:html` → **STRING** (raw HTML)
+- `manual:projects` → **native LIST** of slugs — `RPUSH`/`LREM`/`LRANGE`; **never `SET`/`GET` as a
+  JSON string** (the string-vs-LIST divergence between two faithful builds was the live `WRONGTYPE`).
+- `manual:project:<slug>:meta` → **STRING** — `SET`/`GET` of JSON
+- `manual:project:<slug>:versions` → **native LIST** of version ids — `RPUSH`/`LRANGE`
+- `manual:project:<slug>:version:<vid>:meta` → **STRING** — `SET`/`GET` of JSON
+- `manual:project:<slug>:version:<vid>:html` → **STRING** — `SET`/`GET` (raw HTML)
 
 **Canonical 3-level project shape**
-- `project:<slug>:meta` → **STRING (JSON)**; `project:<slug>:options` → **native LIST** (option slugs)
-- `project:<slug>:option:<oslug>:meta` → **STRING (JSON)**;
-  `project:<slug>:option:<oslug>:versions` → **native LIST** (version slugs)
-- `project:<slug>:option:<oslug>:version:<vslug>:meta` → **STRING (JSON)**
-- `project:<slug>:option:<oslug>:version:<vslug>:html` → **STRING** (raw HTML)
+- `project:<slug>:meta` → **STRING** (`SET`/`GET` of JSON); `project:<slug>:options` → **native LIST**
+  of option slugs — `RPUSH`/`LRANGE`
+- `project:<slug>:option:<oslug>:meta` → **STRING** (JSON); `project:<slug>:option:<oslug>:versions`
+  → **native LIST** of version slugs — `RPUSH`/`LRANGE`
+- `project:<slug>:option:<oslug>:version:<vslug>:meta` → **STRING** (`SET`/`GET` of JSON)
+- `project:<slug>:option:<oslug>:version:<vslug>:html` → **STRING** — `SET`/`GET` (raw HTML)
 
-**Agent anchor cache**
-- `candidate_anchors:<sha256(html) first-32-hex>` → cached candidate-anchor array
+**Agent anchor cache & migration**
+- `candidate_anchors:<sha256(html) first-32-hex>` → **STRING** — `SET`/`GET` of
+  `JSON.stringify(CandidateAnchor[])` (a whole-blob cache; **NOT** a native LIST/SET — read/written
+  in one shot)
+- `migration:v1:done` → **native SET** of migrated keys/ids — `SADD`/`SISMEMBER`/`SMEMBERS`
+  (idempotency tags for the legacy→3-level migration, §4)
 
 **Active-viewer window**: `ACTIVE_VIEWER_WINDOW_MS = 60_000`. A viewer is "live" if
 `lastTs >= now - 60s`. The cumulative list still powers the activity feed + viewed-by panel.
