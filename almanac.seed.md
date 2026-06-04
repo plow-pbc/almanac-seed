@@ -590,13 +590,23 @@ events, display names, and the version-switcher entries.
 
 **The artifact iframe**: `src` = the seed/seed-kv URL, `sandbox="allow-same-origin
 allow-scripts"`, **fluid** so the seed's own media queries fire against its real rendered
-viewport (no CSS transform / no fixed 1280px inner width). **Fill it with `position:absolute;
-inset:0` inside a wrap that is `position:relative; flex:1 1 auto; min-height:0` — do NOT size the
-iframe with `height:100%`.** An `<iframe>` has an intrinsic default height of **150px**; against a
-flex-column parent whose own height isn't explicitly resolved, `height:100%` collapses the artifact
-to ~150px (content fills only the top sliver of the viewport — the layout bug we hit). The
-absolute-inset fill plus `min-height:0` on the flex child lets the artifact stretch to the full
-available height.
+viewport (no CSS transform / no fixed 1280px inner width).
+
+**Fill rule (apply ALL FOUR — do not partially apply):**
+
+```css
+.iframe-wrap   { position: relative; flex: 1 1 auto; min-height: 0; }  /* the containing block */
+.viewer-iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+```
+
+**Why all four (an `<iframe>` is a REPLACED element).** Unlike a normal block, a replaced element
+does **not** stretch to fill `inset:0` — with no explicit size it falls back to its **intrinsic
+~300×150px** (the 150px-tall sliver bug). So you need **both**: `position:absolute; inset:0` (to
+anchor it to the wrap and give it a definite containing block) **and** `width:100%; height:100%` (to
+size the replaced element to that block). The wrap must be `position:relative` (so `inset:0`/`100%`
+resolve against *it*) and `flex:1 1 auto; min-height:0` (so it actually takes the remaining column
+height instead of collapsing). **Dropping `height:100%` because `inset:0` "looks sufficient" is the
+exact v3 mistake — it reverts the iframe to 150px.** All four properties are mandatory together.
 
 **Pin layer** (injected into the iframe document, plain DOM — not React). The pins are an
 **overlay drawn into the seed's iframe document**: absolutely-positioned numbered markers,
