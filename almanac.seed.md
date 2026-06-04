@@ -25,6 +25,123 @@
 
 ---
 
+## Step 0 — Prerequisites & one-time setup (DO THIS FIRST)
+
+> **Front-load every human touch.** Hydrating the app (`## 13.5 Steps`) is fully automated, and
+> the public deploy (`## 13.6`) is CLI/API **except two unavoidable browser actions** — a Vercel
+> device-login and creating the Upstash store. **Clear both of those, plus the passphrase, NOW,
+> before you build anything.** Do this section first and the entire hydrate → build → deploy run
+> straight through with **zero mid-flow surprises** (no "stop, go approve a login", no "stop, go
+> click Connect in a dashboard" surfacing one at a time later).
+
+### 0.0 What you'll need (prerequisites — confirm all before building)
+
+- **A free Vercel account** — Hobby/personal **or** a Team. (Login is a one-time **device-flow you
+  approve in your own browser**, §0.2. Personal and Team differ in one CLI flag — see §0.3.)
+- **Upstash for Redis** — the KV/persistence backend, **provisioned through the Vercel dashboard**
+  (Marketplace). Almanac is a Redis-style KV app — **no SQL, no schema, no migration**; the keyspace
+  is created on first write.
+- **An access passphrase you pick now** — the production, **Google-free** login (§6,
+  `ALMANAC_ACCESS_PASSWORD`). Anyone with it can sign in, so make it strong; this is what you hand
+  reviewers.
+- **A host with Node ≥ 18.17 and the Vercel CLI** (install in §0.1 — mind the bare-host `EACCES`).
+- **(Optional) Google OAuth creds** — only if you also want domain-gated SSO; **not required**, the
+  passphrase covers a public deploy.
+
+### 0.1 Install the Vercel CLI (mind the bare-host `EACCES`)
+
+`## 13.6` assumes a `vercel` binary; a bare/non-root host has none. `npm i -g vercel` then fails with
+**`EACCES`** on the global prefix. Clear it up front with a **user-writable prefix** (no sudo):
+
+```bash
+mkdir -p ~/.npm-global && npm config set prefix ~/.npm-global
+export PATH="$HOME/.npm-global/bin:$PATH"   # add this to your shell rc so it persists
+npm i -g vercel
+vercel --version                            # confirm it's on PATH
+```
+
+(Alternatives: `sudo npm i -g vercel`, or skip the global install and use `npx vercel …` everywhere.)
+
+### 0.2 🧑 Vercel login — device flow (approve in YOUR browser) — **HUMAN STEP #1**
+
+```bash
+vercel login
+```
+
+It prints a device URL like `https://vercel.com/oauth/device?user_code=XXXX-XXXX` and **waits**.
+**You** open that URL in your browser, pick your **scope** (personal account or your Team), and click
+**Confirm** — one click. The CLI then proceeds authenticated; the token is cached at
+`~/Library/Application Support/com.vercel.cli/auth.json` (macOS) or
+`~/.local/share/com.vercel.cli/auth.json` (Linux).
+
+### 0.3 Create the Vercel project (personal-vs-Team **scope gotcha**)
+
+You'll `vercel link` from the hydrated app dir; create the project now or at deploy. The scope flag
+differs by account type:
+
+- **Team account:** `vercel link --yes --project <your-almanac> --scope <your-team>`
+- **Personal account:** **OMIT `--scope`.** Vercel **rejects** `--scope <username>` with
+  *"You cannot set your Personal Account as the scope"*. Use just
+  `vercel link --yes --project <your-almanac>`.
+
+> Likewise, the REST/API calls in `## 13.6` take `?teamId=<team>` **only on a Team** — on a personal
+> account **omit `?teamId=` entirely** and use your username as the scope. If you create a bare
+> project via API, also set `framework: "nextjs"` (§13.6 step 5) or the deploy fails with
+> *"No Output Directory named 'public' found."*
+
+### 0.4 🧑 Provision + connect Upstash Redis (Vercel dashboard) — **HUMAN STEP #2**
+
+In the Vercel dashboard, do the **exact clicks**:
+
+1. Your project → **Storage** → **Create Database** → **"Upstash for Redis"** (Marketplace) →
+   **Connect**.
+2. **Connect Project** → select **`<your-almanac>`** → **All Environments** → **Connect**.
+
+This **auto-injects** `KV_REST_API_URL` + `KV_REST_API_TOKEN` (+ `KV_URL`, `REDIS_URL`,
+`KV_REST_API_READ_ONLY_TOKEN`) into the project across all environments — confirm later with
+`vercel env ls`. No SQL/schema; the keyspace appears on first write. (A no-browser CLI/API path for
+*just the connect* exists in §13.6 step 3, but **store creation itself is this dashboard step**.)
+
+### 0.5 Pick the passphrase + set prod secrets (up front)
+
+Choose your passphrase now, then set the production env so the deploy is clean:
+
+```bash
+printf '%s' "$(openssl rand -base64 32)" | vercel env add NEXTAUTH_SECRET production
+printf '%s' "<your-chosen-passphrase>"   | vercel env add ALMANAC_ACCESS_PASSWORD production
+```
+
+- **Do NOT set `ALMANAC_TEST_LOGIN`** — leaving it unset keeps the dev sign-in bypass **404'd** in
+  prod (the passphrase is the only public login).
+- `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` + `ALLOWED_DOMAIN` **only** if you also want Google SSO.
+- **One value can't be known yet:** `NEXTAUTH_URL` — it's your deploy URL, which Vercel only prints
+  after the first `vercel deploy --prod`. Set it **right after** the first deploy (§13.6 step 8) and
+  redeploy once. That single post-deploy step is **expected**, not a surprise.
+
+### 0.6 Deployment Protection will need turning OFF (know it now)
+
+New Vercel projects default to **Vercel Authentication** (`ssoProtection`), which 401s the **entire**
+URL — even `/login` — to outside visitors. You'll disable it during deploy (§13.6 step 7:
+dashboard **Settings → Deployment Protection → Vercel Authentication → Disabled**, or
+`PATCH /v9/projects/<prj>` `{"ssoProtection":null}`). Flagged here so it's not a surprise — your app's
+own passphrase is the real gate.
+
+### ✅ 0.7 Gate-cleared checklist (every human touch done → rest is automated)
+
+- [ ] Vercel CLI installed and on `PATH` (`vercel --version`)
+- [ ] `vercel login` approved in browser (🧑 #1)
+- [ ] Project created with the **correct scope** (omit `--scope` on personal)
+- [ ] Upstash store **created + connected → All Environments** (🧑 #2); `KV_REST_API_*` present
+- [ ] Passphrase chosen → `ALMANAC_ACCESS_PASSWORD` + `NEXTAUTH_SECRET` set (production)
+- [ ] `ALMANAC_TEST_LOGIN` left **unset**
+- [ ] Aware `NEXTAUTH_URL` is set once post-first-deploy, and Deployment Protection gets disabled
+
+With every box checked, run `## 13.5 Steps` (hydrate/build) then `## 13.6 Deploy` — they execute
+**CLI/API-only, no further human interruptions**, ending at a live public URL you log into with your
+passphrase.
+
+---
+
 ## 1. Purpose & context
 
 **Almanac** (codebase package name `seeds-feedback`; product/brand name shown to users:
