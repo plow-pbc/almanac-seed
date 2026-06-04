@@ -40,7 +40,9 @@
   approve in your own browser**, §0.2. Personal and Team differ in one CLI flag — see §0.3.)
 - **Upstash for Redis** — the KV/persistence backend, **provisioned through the Vercel dashboard**
   (Marketplace). Almanac is a Redis-style KV app — **no SQL, no schema, no migration**; the keyspace
-  is created on first write.
+  is created on first write. **⚠️ Cost heads-up:** creating the store usually has **NO free tier** —
+  you must **select a paid plan (the cheapest, ~$10/mo)**. Know this before you start (it is a real
+  prerequisite, not a free click).
 - **An access passphrase you pick now** — the production, **Google-free** login (§6,
   `ALMANAC_ACCESS_PASSWORD`). Anyone with it can sign in, so make it strong; this is what you hand
   reviewers.
@@ -94,7 +96,8 @@ differs by account type:
 In the Vercel dashboard, do the **exact clicks**:
 
 1. Your project → **Storage** → **Create Database** → **"Upstash for Redis"** (Marketplace) →
-   **Connect**.
+   **select a plan** — the **cheapest available (~$10/mo); there is often NO free tier**, so you
+   must pick a paid plan → **Create** (region is auto-assigned) → **Connect**.
 2. **Connect Project** → select **`<your-almanac>`** → **All Environments** → **Connect**.
 
 This **auto-injects** `KV_REST_API_URL` + `KV_REST_API_TOKEN` (+ `KV_URL`, `REDIS_URL`,
@@ -1185,8 +1188,9 @@ Postgres/Supabase, so there is **no SQL schema/migration**). Auth = the **passph
 3. **Provision Upstash Redis** (no SQL/schema — Redis keyspace is created on first write).
    Two ways:
    - **🧑 Dashboard (simplest):** your project → **Storage → Create Database → "Upstash for
-     Redis" (Marketplace) → Connect**, then **Connect Project → select `<your-almanac>` →
-     All Environments → Connect.**
+     Redis" (Marketplace) → select a plan (cheapest available, ~$10/mo — often NO free tier, so a
+     paid plan is required) → Create (region auto) → Connect**, then **Connect Project → select
+     `<your-almanac>` → All Environments → Connect.**
    - **CLI/API (no browser click for the connect — verified):** create the store once in the
      dashboard (or reuse an existing one), then connect it to the project via the Vercel REST
      API — the endpoint the dashboard button calls, which the `vercel` CLI does *not* expose
