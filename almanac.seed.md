@@ -103,11 +103,11 @@ project**:
 
 > **⚠️ ONE store per deploy — NEVER share an Upstash store between two Almanacs.** Create a
 > **fresh, dedicated** store here; do **not** connect a store that another Almanac project already
-> uses. Two Almanacs on one store collide on identical key names (e.g. `manual:projects`): one app
-> writes a key as one Redis type and the other reads it as another, and the index throws
+> uses. Two Almanacs on one store collide on identical key names (e.g. `manual:projects`): if the
+> two builds chose different *physical* Redis types for that key, the index throws
 > **`UpstashError: WRONGTYPE … ["lrange","manual:projects",…]` → HTTP 500** ("Application error:
-> a server-side exception"). One deploy = one store. (Belt-and-suspenders: the build also
-> namespaces all keys per-deploy — see §5 — but the rule is still one dedicated store each.)
+> a server-side exception"). One deploy = one store. (§5 now pins each key's physical Redis type so
+> two faithful builds can't diverge — but the rule is still one dedicated store each.)
 
 This **auto-injects** `KV_REST_API_URL` + `KV_REST_API_TOKEN` (+ `KV_URL`, `REDIS_URL`,
 `KV_REST_API_READ_ONLY_TOKEN`) into the project across all environments — confirm later with
@@ -313,51 +313,62 @@ triplets; it does **not** delete legacy keys.
 > `<p>` = projectId, `<o>` = optionId, `<v>` = versionId, `<id>` = comment/reply id,
 > `<e>` = emoji. IDs are `crypto.randomBytes(8).toString("hex")` → **16 hex chars**.
 
-> **Per-deploy key namespace (collision-proofing — REQUIRED).** Every key below is transparently
-> prefixed with **`<ALMANAC_KV_PREFIX>:`** by the KV wrapper. `ALMANAC_KV_PREFIX` is an env var; if
-> unset it **defaults to a stable per-deployment value** (derive from `VERCEL_PROJECT_PRODUCTION_URL`
-> /project name; empty only for single-store local dev). This guarantees that **even if two Almanacs
-> are ever pointed at the same Upstash store, their keyspaces cannot collide** — without it, both
-> apps write `manual:projects` etc. and one app's type clobbers the other (the live `WRONGTYPE`
-> 500 we hit). The prefix is the safety net; the deploy rule is still **one dedicated store per app**
-> (§0.4, §13.6). **Every key's Redis TYPE is fixed (below)** — write a key only with the ops for its
-> type; a list key is **only** `RPUSH`/`LREM`/`LRANGE`, never `SET`/`GET`.
+> **Physical Redis types are FIXED — pin the wire shape, not just the semantics (REQUIRED).**
+> Describing a key only semantically ("list of slugs") let two **faithful** builds diverge on the
+> *physical* type — one stored `manual:projects` as a **JSON string** (`SET`/`GET`), another as a
+> **native LIST** (`RPUSH`/`LRANGE`). Each works in isolation; they only collide (`WRONGTYPE`) when a
+> store is shared — but the seed must remove the ambiguity regardless. Build **every** key to the
+> concrete native type below, via that type's ops only. Descriptor → physical type:
+>   - **"list" / "list of X"** → **native Redis LIST** — `RPUSH`/`LPUSH`/`LREM`/`LRANGE`/`LLEN`.
+>     **Never** a JSON array stored via `SET`/`GET`.
+>   - **"hash" / `{ k: v }`** → **native Redis HASH** — `HSET`/`HGET`/`HGETALL`/`HINCRBY`/`HDEL`.
+>     **Never** a JSON object packed into a string.
+>   - **"set" / "set of X"** → **native Redis SET** — `SADD`/`SREM`/`SISMEMBER`/`SMEMBERS`/`SCARD`.
+>   - **"<Type> JSON" / `{ … }` / `{ … } | null`** → a **STRING holding `JSON.stringify(value)`**
+>     (`SET`/`GET`; `JSON.parse` on read).
+>   - plain **"string"** → a **STRING** (`SET`/`GET`).
+> The per-key type annotations below are authoritative. Storage model is unchanged — **one
+> dedicated store per deploy** (own-store-per-stranger, §0.4/§13.6); a store is never shared.
 >
-> **WRONGTYPE guard (REQUIRED).** Reads of the project-index/list keys must **not crash the page**
-> if a key is somehow the wrong type (legacy/foreign data): on a `WRONGTYPE` (or a type check that
-> fails) treat the key as **empty** (and may re-init it correctly) rather than letting the exception
-> bubble to a 500. A poisoned key must degrade to "no manual projects", never an Application Error.
+> **Optional hardening (NOT required).** The `kv.ts` wrapper MAY additionally catch a stray
+> `UpstashError: WRONGTYPE` on reads and return the type's safe default (`[]` / `null` / `{}`) —
+> optionally `del`+retry so a foreign/legacy key self-heals — degrading instead of 500-ing. With the
+> physical types pinned above this cannot arise from the app's own writes, so it's belt-and-suspenders
+> only, not a requirement.
 
-**Comments / replies / reactions / resolve**
-- `comment:<id>` → Comment JSON
-- `version:<p>:<o>:<v>:comments` → list of comment ids (RPUSH order = pin order)
-- `version:<p>:<v>:comments` → **legacy** 2-level list (read-fallback for v1)
-- `comment:<id>:replies` → list of reply ids
-- `reply:<id>` → Reply JSON
-- `comment:<id>:reactions` / `reply:<id>:reactions` → hash `{ emoji: count }`
-- `comment:<id>:reactions:<e>:users` / `reply:<id>:reactions:<e>:users` → set of userIds
-- `comment:<id>:resolved` → `{ by, at }` | null
-- `version:<p>:<o>:<v>:resolved` → set of resolved comment ids (+ legacy `version:<p>:<v>:resolved`)
+**Comments / replies / reactions / resolve** *(physical types per the legend above)*
+- `comment:<id>` → **STRING** (Comment JSON)
+- `version:<p>:<o>:<v>:comments` → **native LIST** of comment ids (RPUSH order = pin order)
+- `version:<p>:<v>:comments` → **legacy** 2-level **native LIST** (read-fallback for v1)
+- `comment:<id>:replies` → **native LIST** of reply ids
+- `reply:<id>` → **STRING** (Reply JSON)
+- `comment:<id>:reactions` / `reply:<id>:reactions` → **native HASH** `{ emoji: count }`
+- `comment:<id>:reactions:<e>:users` / `reply:<id>:reactions:<e>:users` → **native SET** of userIds
+- `comment:<id>:resolved` → **STRING** (`{ by, at } | null` JSON)
+- `version:<p>:<o>:<v>:resolved` → **native SET** of resolved comment ids (+ legacy `version:<p>:<v>:resolved`)
 
-**Presence / display names / status / per-user**
-- `version:<p>:<o>:<v>:viewers` → hash `{ email: ViewerJSON }` (+ legacy `version:<p>:<v>:viewers`)
+**Presence / display names / status / per-user** *(physical types per the legend above)*
+- `version:<p>:<o>:<v>:viewers` → **native HASH** — field = email, value = **STRING (ViewerJSON)**
+  (+ legacy `version:<p>:<v>:viewers`)
 - `project:<p>:displayName`, `project:<p>:option:<o>:displayName`,
-  `version:<p>:<o>:<v>:displayName` (+ legacy `version:<p>:<v>:displayName`)
-- `project:<p>:status` → status override string
-- `user:<userId>` → display-name (legacy; userId now = lowercased email)
+  `version:<p>:<o>:<v>:displayName` → **STRING** each (+ legacy `version:<p>:<v>:displayName`)
+- `project:<p>:status` → **STRING** (status override)
+- `user:<userId>` → **STRING** (display-name; legacy; userId now = lowercased email)
 
 **Manual project (legacy mirror shape)**
-- `manual:projects` → **Redis LIST of slugs** — write with `RPUSH`/`LREM`, read with `LRANGE`;
-  **never `SET`/`GET` this key as a string** (a string write makes every list-reader `WRONGTYPE`→500,
-  the exact live bug). Plus `manual:project:<slug>:meta`,
-  `manual:project:<slug>:versions`, `manual:project:<slug>:version:<vid>:meta`,
-  `manual:project:<slug>:version:<vid>:html`
+- `manual:projects` → **native LIST of slugs** — `RPUSH`/`LREM`/`LRANGE`; **never `SET`/`GET` as a
+  JSON string** (the string-vs-LIST divergence between two faithful builds is the exact `WRONGTYPE`).
+- `manual:project:<slug>:meta` → **STRING (JSON)**
+- `manual:project:<slug>:versions` → **native LIST** (version ids)
+- `manual:project:<slug>:version:<vid>:meta` → **STRING (JSON)**
+- `manual:project:<slug>:version:<vid>:html` → **STRING** (raw HTML)
 
 **Canonical 3-level project shape**
-- `project:<slug>:meta`, `project:<slug>:options` (list)
-- `project:<slug>:option:<oslug>:meta`, `project:<slug>:option:<oslug>:versions` (list)
-- `project:<slug>:option:<oslug>:version:<vslug>:meta`
-- `project:<slug>:option:<oslug>:version:<vslug>:html`
+- `project:<slug>:meta` → **STRING (JSON)**; `project:<slug>:options` → **native LIST** (option slugs)
+- `project:<slug>:option:<oslug>:meta` → **STRING (JSON)**;
+  `project:<slug>:option:<oslug>:versions` → **native LIST** (version slugs)
+- `project:<slug>:option:<oslug>:version:<vslug>:meta` → **STRING (JSON)**
+- `project:<slug>:option:<oslug>:version:<vslug>:html` → **STRING** (raw HTML)
 
 **Agent anchor cache**
 - `candidate_anchors:<sha256(html) first-32-hex>` → cached candidate-anchor array
@@ -578,8 +589,14 @@ events, display names, and the version-switcher entries.
 - An **"Activity"** panel toggle showing a count (`comments + viewers`).
 
 **The artifact iframe**: `src` = the seed/seed-kv URL, `sandbox="allow-same-origin
-allow-scripts"`, **fluid** (width/height 100%) so the seed's own media queries fire against
-its real rendered viewport (no CSS transform / no fixed 1280px inner width).
+allow-scripts"`, **fluid** so the seed's own media queries fire against its real rendered
+viewport (no CSS transform / no fixed 1280px inner width). **Fill it with `position:absolute;
+inset:0` inside a wrap that is `position:relative; flex:1 1 auto; min-height:0` — do NOT size the
+iframe with `height:100%`.** An `<iframe>` has an intrinsic default height of **150px**; against a
+flex-column parent whose own height isn't explicitly resolved, `height:100%` collapses the artifact
+to ~150px (content fills only the top sliver of the viewport — the layout bug we hit). The
+absolute-inset fill plus `min-height:0` on the flex child lets the artifact stretch to the full
+available height.
 
 **Pin layer** (injected into the iframe document, plain DOM — not React). The pins are an
 **overlay drawn into the seed's iframe document**: absolutely-positioned numbered markers,
