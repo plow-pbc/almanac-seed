@@ -230,8 +230,13 @@ triplets; it does **not** delete legacy keys.
   through the `jwt` + `session` callbacks. Sign-in + error pages both route to `/login`.
 - **Identity** (`readIdentity`): from the server session; `userId = lowercased email`,
   plus `name`, `email`, `image`. No session ⇒ null.
-- **Edge middleware** gates everything. Verifies the NextAuth JWT (`getToken`) and that the
-  email ends in `@plow.co`. Behavior:
+- **Edge middleware** gates everything. It gates on a **valid session** — `getToken` returns
+  a JWT **with an `email`** — and **nothing more.** ⚠️ It must **NOT** hard-check `@plow.co`:
+  the domain restriction is enforced **only at the Google sign-in `signIn`/`authorize`
+  callback** (gated by `ALLOWED_DOMAIN`), never in the middleware. (A **passphrase** session's
+  identity is `…@almanac.local` — if the middleware hard-gated `@plow.co` it would bounce every
+  passphrase user off every page, breaking the public deploy. This bug is **invisible to the
+  §16 dev journeys**, which sign in as `tester@plow.co` — so do not reintroduce it.) Behavior:
   - Skip `/_next`, `/favicon*`, `/robots.txt`.
   - **Public paths** (no session needed): `/api/auth/*`, `/api/agent-comments(/…)`,
     `/api/agent-artifact(/…)`, `/login`, **and `/api/test-login` (dev only — see below)**.
@@ -1045,7 +1050,15 @@ Backend = **Upstash Redis** (Vercel KV is Upstash; Almanac is a Redis-style KV a
 Postgres/Supabase, so there is **no SQL schema/migration**). Auth = the **passphrase login**
 (§6). Most steps are CLI; exactly **two are unavoidable human browser actions** (marked 🧑).
 
-> Prereq: a free **Vercel** account, and the app hydrated locally (`## Steps`).
+> Prereqs: a free **Vercel** account; the app hydrated locally (`## Steps`); and the **Vercel
+> CLI installed** — `npm i -g vercel` (the bare host has no `vercel` binary).
+>
+> **Account note:** the REST/API calls below take `?teamId=<team>`. That's for a **Team**
+> account — on a **personal/free** account there is **no team**, so **omit `?teamId=` entirely**
+> (and use your username as `<scope>`). The CLI auth token lives at
+> `~/Library/Application Support/com.vercel.cli/auth.json` on **macOS** and
+> `~/.local/share/com.vercel.cli/auth.json` on **Linux**. The dashboard path works for every
+> step if you'd rather click than curl.
 
 1. **🧑 Vercel login (browser).** Run `vercel login`. It prints a device URL like
    `https://vercel.com/oauth/device?user_code=XXXX-XXXX` and waits. **You** open that URL and
