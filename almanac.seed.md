@@ -64,7 +64,7 @@ Character traits the rebuild must preserve:
   Components for pages; `"use client"` for interactive components. Route handlers under
   `src/app/api/**`. Path alias `@/* → src/*`.
 - **Runtime**: dev + prod server on **port 3210** (`next dev -p 3210` / `next start -p 3210`).
-- **Auth**: **NextAuth v4** with the **Google** provider, JWT session strategy. Edge
+- **Auth**: **NextAuth v4**, JWT session strategy, with **two providers**: **Google** OAuth (optional SSO; domain-gated) and a **Credentials "passphrase"** provider (the production, Google-free login, gated by `ALMANAC_ACCESS_PASSWORD` — see §6). Plus a dev-only `test-login` route. Edge
   **middleware** is the first gate.
 - **Persistence**: **Vercel KV** (`@vercel/kv`, a Redis-compatible store) for ALL mutable
   state (comments, replies, reactions, viewers, resolves, project/option/version metadata,
@@ -266,6 +266,33 @@ triplets; it does **not** delete legacy keys.
   - It must be in middleware **PUBLIC_PATHS** so an unauthenticated caller can reach it.
   - With this, a stranger (or Playwright) hits `/api/test-login` once and is a signed-in
     `@plow.co` user for every gated page — no Google, no harness, no hand-minted token.
+- **Passphrase login — the real PRODUCTION auth (MANDATORY for a public deploy; Google is optional).**
+  `test-login` is dev-only (404 in prod), and Google OAuth requires the deployer's own OAuth
+  client + a workspace domain — so for a stranger to stand up a **real, secured, public**
+  Almanac with **no Google at all**, the build ships a **NextAuth Credentials provider**
+  ("passphrase") as a first-class, production auth path:
+  - **Active iff `ALMANAC_ACCESS_PASSWORD` is set** (a strong secret in the deploy env). When
+    it's unset, the provider is not offered (dev relies on `test-login`; a Google-only deploy
+    ignores it).
+  - **`/login` renders a passphrase field** (a "name" field too, optional — see identity
+    below) whenever the provider is active, **in addition to** the Google button when
+    `GOOGLE_*` is configured. With neither Google nor passphrase configured, only `test-login`
+    (dev) can sign in.
+  - **`authorize` callback**: compare the submitted passphrase to `ALMANAC_ACCESS_PASSWORD`
+    **constant-time** (timing-safe; reject on mismatch). On success, return a session identity
+    and mint the **same NextAuth JWT** (signed with `NEXTAUTH_SECRET`) the rest of the app
+    already consumes — so middleware/`readIdentity`/pins all work unchanged.
+  - **Identity for passphrase sessions**: the login form takes an optional **display name**;
+    the session is `{ name: <entered name or "Reviewer">, email: <slug(name)>@<ALMANAC_IDENTITY_DOMAIN
+    or "almanac.local"> }`. This keeps per-reviewer comment attribution while staying a single
+    shared-secret gate. (Avatars fall back to deterministic initials — no Google image.)
+  - **`ALLOWED_DOMAIN` becomes env-configurable** (default `plow.co`): it gates **Google**
+    sign-ins only. The passphrase provider is **not** domain-gated (anyone with the secret is
+    in) — that's the whole point of a self-contained public deploy. Set `ALLOWED_DOMAIN` to
+    your workspace domain if you use Google; ignore it if you use the passphrase.
+  - **Faithfulness / Verify**: this does **not** change the dev journeys — `## Verify` still
+    signs in via `test-login` (J1–J27 unchanged). The passphrase path is the prod/public auth
+    and is exercised by the `## Deploy (public)` acceptance check, not by the §16 dev journeys.
 - **Agent two-header gate** (the three agent endpoints): require **both**
   - `x-vercel-protection-bypass` == `VERCEL_AUTOMATION_BYPASS_SECRET` (layer 1; missing/wrong
     ⇒ **401**), and
@@ -289,7 +316,7 @@ triplets; it does **not** delete legacy keys.
 | Path | What it is |
 |---|---|
 | `/` | **Index**: project list filtered by status. |
-| `/login` | Google sign-in card (public). |
+| `/login` | Sign-in card (public): a **passphrase field** when `ALMANAC_ACCESS_PASSWORD` is set, and/or a **Google button** when `GOOGLE_*` is set (§6). |
 | `/welcome` | Obsolete; 307→`/`. |
 | `/p/[projectId]` | **Project page**: option grid + status + rename + add-option (manual only). |
 | `/p/[projectId]/[optionId]` | Thin resolver → **redirect to the latest version** of the option. |
@@ -938,7 +965,10 @@ resolve model). Optional `x-almanac-agent-author` → written as the resolve `by
 | `cookoff-seeds/` corpus | yes | **seed creates an example if absent** | `ls cookoff-seeds/*/*.html` | **Seed self-seeds** (Steps §4): if the dir is empty/missing, write an example `cookoff-seeds/seed/v1.html` (a small valid HTML doc) so auto-discovery surfaces ≥1 project and the app is navigable from a bare paste. |
 | `NEXTAUTH_SECRET` | yes | **seed auto-generates** | env set | If unset, Steps generates one (`openssl rand -base64 32`) into `.env.local`. Signs the session JWT (incl. the dev-login token). |
 | `ALMANAC_TEST_LOGIN` | yes (dev/verify) | **`1` in dev `.env.local`** | env set | Enables `GET /api/test-login` (§6) so the app is loggable as `@plow.co` **without Google**. Steps sets it to `1` for local build+verify; it MUST be unset in prod. |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | conditional (**prod only**) | none | env set | Real Google OAuth (Workspace **Internal**, plow.co). **Not needed to build or verify locally** — the dev-login bypass covers that. Required only for a real plow.co deployment. |
+| `ALMANAC_ACCESS_PASSWORD` | **yes for a public deploy** | none | env set | The **production passphrase** (a strong secret). Enables the NextAuth Credentials login (§6) so a stranger's public deploy has real, Google-free auth. Unset in plain dev (Verify uses `test-login`). |
+| `ALMANAC_IDENTITY_DOMAIN` | no | `almanac.local` | env set | Email domain used to synthesize the passphrase-session identity (`<slug(name)>@<domain>`) for comment attribution (§6). Cosmetic. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | conditional (**SSO option**) | none | env set | Optional Google OAuth (domain-gated by `ALLOWED_DOMAIN`). **Not needed** — the passphrase login (above) covers a public deploy with no Google. Use only if you want real per-user SSO. |
+| `ALLOWED_DOMAIN` | no | `plow.co` | env set | Email-domain gate for **Google** sign-ins only (§6). Set to your workspace domain if using Google; ignored by the passphrase provider. |
 | `NEXTAUTH_URL` | conditional (prod) | `http://localhost:3210` | env set | Public base URL of the deploy. Local default is fine for build+verify. |
 | `KV_REST_API_URL` + `KV_REST_API_TOKEN` | no (dev) / yes (prod) | none → in-memory store | both env set | Vercel KV. **Absent ⇒ in-memory fallback** (per-process, non-durable) — fine for build+verify. Provision for shared/prod use. |
 | `ALMANAC_AGENT_API_KEY` | conditional (agent door) | **seed sets a dev value** | env set | Steps sets a throwaway value in `.env.local` so the agent-endpoint journeys (J20–J22) can run locally. Use a real secret in prod. |
@@ -1075,9 +1105,11 @@ authors its own equivalent suite from §16.
 
 Each states an action and the observable expected result. Manual or headless (Playwright).
 
-1. **Auth gate.** Hit `/` with no session. *Expect:* redirect to `/login?next=/`. `/login`
-   shows the "sign in with Google" card. A non-`@plow.co` rejection surfaces "Almanac is only
-   for @plow.co accounts."
+1. **Auth gate.** Hit `/` with no session. *Expect:* redirect to `/login?next=/`, and `/login`
+   renders a **sign-in card** with whatever providers are configured — the **passphrase field**
+   (when `ALMANAC_ACCESS_PASSWORD` is set) and/or the **Google button** (when `GOOGLE_*` is set).
+   (In dev `## Verify` signs in via `test-login`; the Google domain-rejection copy "Almanac is
+   only for @plow.co accounts" appears only when Google is the configured provider.)
 2. **Index list + status filter.** Signed in, open `/`. *Expect:* at least one project row
    (`<N> options · <M> pins`, "updated …"); clicking `archived`/`shipped` pills re-filters;
    default is `active`.
