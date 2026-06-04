@@ -909,6 +909,16 @@ the **base** so the rounded outline survives in every state:
 
 ### 9.4 Geometry, spacing & shadows
 
+- **Full-height chain (REQUIRED — every page fills the viewport).** Set `html, body { height: 100%; }`
+  (`margin:0`), and the **top-level container of EVERY route** (index list, project, option/version
+  viewer, login, welcome) must establish **`min-height: 100vh`** (`100dvh` on mobile) as a
+  **flex column** so the background and layout stretch to the full screen. The sticky top bar sits
+  at the top and a **`flex: 1`** content region fills the remaining height (the viewer's iframe
+  region already uses `flex: 1 1 auto; min-height: 0`). **Without this the body collapses to content
+  height and the page renders in only the top ~10–20% of the viewport with empty space below** — a
+  real bug we shipped: `html, body` had no `height` and the index's `.frame` wrapper had no
+  `min-height`, while only `.login-wrap`/`.viewer` set `100vh`. The whole app shell, not just two
+  routes, must carry the full-height chain.
 - **Radius**: `--radius-sm 4px` (crumbs, kbd, small chips) · `--radius 8px` (inputs) ·
   `--radius-lg 12px` (cards, popovers, modals) · **`999px`** for all pills/buttons/avatars.
 - **Borders**: hairlines use `--rule`; cards `--card-border`; emphasized `--card-border-deep`
