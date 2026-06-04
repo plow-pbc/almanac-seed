@@ -93,12 +93,21 @@ differs by account type:
 
 ### 0.4 🧑 Provision + connect Upstash Redis (Vercel dashboard) — **HUMAN STEP #2**
 
-In the Vercel dashboard, do the **exact clicks**:
+In the Vercel dashboard, do the **exact clicks** — creating a **NEW store dedicated to THIS
+project**:
 
 1. Your project → **Storage** → **Create Database** → **"Upstash for Redis"** (Marketplace) →
    **select a plan** — the **cheapest available (~$10/mo); there is often NO free tier**, so you
    must pick a paid plan → **Create** (region is auto-assigned) → **Connect**.
 2. **Connect Project** → select **`<your-almanac>`** → **All Environments** → **Connect**.
+
+> **⚠️ ONE store per deploy — NEVER share an Upstash store between two Almanacs.** Create a
+> **fresh, dedicated** store here; do **not** connect a store that another Almanac project already
+> uses. Two Almanacs on one store collide on identical key names (e.g. `manual:projects`): one app
+> writes a key as one Redis type and the other reads it as another, and the index throws
+> **`UpstashError: WRONGTYPE … ["lrange","manual:projects",…]` → HTTP 500** ("Application error:
+> a server-side exception"). One deploy = one store. (Belt-and-suspenders: the build also
+> namespaces all keys per-deploy — see §5 — but the rule is still one dedicated store each.)
 
 This **auto-injects** `KV_REST_API_URL` + `KV_REST_API_TOKEN` (+ `KV_URL`, `REDIS_URL`,
 `KV_REST_API_READ_ONLY_TOKEN`) into the project across all environments — confirm later with
@@ -304,6 +313,21 @@ triplets; it does **not** delete legacy keys.
 > `<p>` = projectId, `<o>` = optionId, `<v>` = versionId, `<id>` = comment/reply id,
 > `<e>` = emoji. IDs are `crypto.randomBytes(8).toString("hex")` → **16 hex chars**.
 
+> **Per-deploy key namespace (collision-proofing — REQUIRED).** Every key below is transparently
+> prefixed with **`<ALMANAC_KV_PREFIX>:`** by the KV wrapper. `ALMANAC_KV_PREFIX` is an env var; if
+> unset it **defaults to a stable per-deployment value** (derive from `VERCEL_PROJECT_PRODUCTION_URL`
+> /project name; empty only for single-store local dev). This guarantees that **even if two Almanacs
+> are ever pointed at the same Upstash store, their keyspaces cannot collide** — without it, both
+> apps write `manual:projects` etc. and one app's type clobbers the other (the live `WRONGTYPE`
+> 500 we hit). The prefix is the safety net; the deploy rule is still **one dedicated store per app**
+> (§0.4, §13.6). **Every key's Redis TYPE is fixed (below)** — write a key only with the ops for its
+> type; a list key is **only** `RPUSH`/`LREM`/`LRANGE`, never `SET`/`GET`.
+>
+> **WRONGTYPE guard (REQUIRED).** Reads of the project-index/list keys must **not crash the page**
+> if a key is somehow the wrong type (legacy/foreign data): on a `WRONGTYPE` (or a type check that
+> fails) treat the key as **empty** (and may re-init it correctly) rather than letting the exception
+> bubble to a 500. A poisoned key must degrade to "no manual projects", never an Application Error.
+
 **Comments / replies / reactions / resolve**
 - `comment:<id>` → Comment JSON
 - `version:<p>:<o>:<v>:comments` → list of comment ids (RPUSH order = pin order)
@@ -323,7 +347,9 @@ triplets; it does **not** delete legacy keys.
 - `user:<userId>` → display-name (legacy; userId now = lowercased email)
 
 **Manual project (legacy mirror shape)**
-- `manual:projects` (list of slugs), `manual:project:<slug>:meta`,
+- `manual:projects` → **Redis LIST of slugs** — write with `RPUSH`/`LREM`, read with `LRANGE`;
+  **never `SET`/`GET` this key as a string** (a string write makes every list-reader `WRONGTYPE`→500,
+  the exact live bug). Plus `manual:project:<slug>:meta`,
   `manual:project:<slug>:versions`, `manual:project:<slug>:version:<vid>:meta`,
   `manual:project:<slug>:version:<vid>:html`
 
@@ -1192,14 +1218,19 @@ Postgres/Supabase, so there is **no SQL schema/migration**). Auth = the **passph
    click **Confirm** (pick your team/scope). One click; the CLI then proceeds authenticated.
 2. **Link/create the project (CLI).** `vercel link --yes --project <your-almanac> --scope <your-scope>`
    (creates the Vercel project).
-3. **Provision Upstash Redis** (no SQL/schema — Redis keyspace is created on first write).
-   Two ways:
+3. **Provision Upstash Redis — a NEW, DEDICATED store for THIS project** (no SQL/schema — the
+   Redis keyspace is created on first write). **⚠️ NEVER connect a store another Almanac already
+   uses:** two Almanacs sharing one store collide on identical key names (e.g. `manual:projects`)
+   and the index throws **`UpstashError: WRONGTYPE … ["lrange","manual:projects",…]` → HTTP 500**
+   as soon as one app wrote a key as a different Redis type than another reads it. **One deploy =
+   one store.** Two ways to create + connect:
    - **🧑 Dashboard (simplest):** your project → **Storage → Create Database → "Upstash for
      Redis" (Marketplace) → select a plan (cheapest available, ~$10/mo — often NO free tier, so a
      paid plan is required) → Create (region auto) → Connect**, then **Connect Project → select
      `<your-almanac>` → All Environments → Connect.**
-   - **CLI/API (no browser click for the connect — verified):** create the store once in the
-     dashboard (or reuse an existing one), then connect it to the project via the Vercel REST
+   - **CLI/API (no browser click for the connect — verified):** create a **fresh, dedicated**
+     store in the dashboard (**do NOT reuse a store already connected to another Almanac** — that
+     is the WRONGTYPE footgun above), then connect it to the project via the Vercel REST
      API — the endpoint the dashboard button calls, which the `vercel` CLI does *not* expose
      (`integration-resource` only disconnects/removes). With your CLI token
      (`~/Library/Application Support/com.vercel.cli/auth.json`) and `teamId`/`storeId`/`projectId`:
