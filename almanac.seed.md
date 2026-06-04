@@ -1037,6 +1037,50 @@ the agent adapts the exact command to the host's OS/pkg-mgr. Step 0 is the Inter
 
 ---
 
+## 13.6 Deploy (public) — your OWN live Almanac on Vercel + Upstash Redis
+
+Local build/verify proves the app; this section makes it a **real, public, secured deploy
+that anyone reaches from outside your LAN — with YOUR OWN accounts/keys, no `plow` anything.**
+Backend = **Upstash Redis** (Vercel KV is Upstash; Almanac is a Redis-style KV app — **not**
+Postgres/Supabase, so there is **no SQL schema/migration**). Auth = the **passphrase login**
+(§6). Most steps are CLI; exactly **two are unavoidable human browser actions** (marked 🧑).
+
+> Prereq: a free **Vercel** account, and the app hydrated locally (`## Steps`).
+
+1. **🧑 Vercel login (browser).** Run `vercel login`. It prints a device URL like
+   `https://vercel.com/oauth/device?user_code=XXXX-XXXX` and waits. **You** open that URL and
+   click **Confirm** (pick your team/scope). One click; the CLI then proceeds authenticated.
+2. **Link/create the project (CLI).** `vercel link --yes --project <your-almanac> --scope <your-scope>`
+   (creates the Vercel project).
+3. **🧑 Provision Upstash Redis (browser — the one storage click).** In the Vercel dashboard:
+   **your project → Storage → Create Database → "Upstash for Redis" (Marketplace) → Connect**,
+   then **Connect Project → select `<your-almanac>` → All Environments → Connect.** This
+   **auto-injects `KV_REST_API_URL` + `KV_REST_API_TOKEN`** into the project. *(There is no
+   Vercel-CLI command to connect a Marketplace store — `integration-resource` only
+   disconnects/removes — so this step is dashboard-only. Redis needs no schema; the keyspace
+   is created on first write.)* Confirm with `vercel env ls` that the two `KV_REST_API_*`
+   vars appear.
+4. **Set the remaining prod env (CLI).** Generate + set, e.g.:
+   `printf '%s' "$(openssl rand -base64 32)" | vercel env add NEXTAUTH_SECRET production`;
+   `printf '%s' "<a strong passphrase>" | vercel env add ALMANAC_ACCESS_PASSWORD production`.
+   **Do NOT set `ALMANAC_TEST_LOGIN`** (so the dev bypass 404s in prod). `GOOGLE_*` +
+   `ALLOWED_DOMAIN` only if you also want Google SSO.
+5. **Deploy (CLI).** `vercel deploy --prod` → it prints your `https://<project>.vercel.app` URL.
+6. **Set the public URL + redeploy (CLI).**
+   `printf '%s' "https://<project>.vercel.app" | vercel env add NEXTAUTH_URL production`, then
+   `vercel deploy --prod` again (so NextAuth callbacks resolve to the real host).
+7. **Confirm it's live + public.** From **off your LAN** (phone on cellular, or a server-side
+   fetch): the URL loads `/login`; signing in with the **passphrase** reaches the index; a
+   comment you leave **persists** (reload / second device shows it) — proving the **real
+   Upstash backend**, not in-memory.
+
+**Acceptance (the public deploy is done when):** an external client reaches
+`https://<project>.vercel.app`, logs in via the passphrase, and a left comment survives a
+reload (Upstash-persisted). The only human steps were #1 (Vercel device login) and #3 (the
+Upstash connect click); everything else is the CLI above.
+
+---
+
 ## 14. Done (observable conditions)
 
 Each independently checkable from a fresh shell (KV-less dev mode is fine for most):
