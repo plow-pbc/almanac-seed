@@ -1052,14 +1052,21 @@ Postgres/Supabase, so there is **no SQL schema/migration**). Auth = the **passph
    click **Confirm** (pick your team/scope). One click; the CLI then proceeds authenticated.
 2. **Link/create the project (CLI).** `vercel link --yes --project <your-almanac> --scope <your-scope>`
    (creates the Vercel project).
-3. **🧑 Provision Upstash Redis (browser — the one storage click).** In the Vercel dashboard:
-   **your project → Storage → Create Database → "Upstash for Redis" (Marketplace) → Connect**,
-   then **Connect Project → select `<your-almanac>` → All Environments → Connect.** This
-   **auto-injects `KV_REST_API_URL` + `KV_REST_API_TOKEN`** into the project. *(There is no
-   Vercel-CLI command to connect a Marketplace store — `integration-resource` only
-   disconnects/removes — so this step is dashboard-only. Redis needs no schema; the keyspace
-   is created on first write.)* Confirm with `vercel env ls` that the two `KV_REST_API_*`
-   vars appear.
+3. **Provision Upstash Redis** (no SQL/schema — Redis keyspace is created on first write).
+   Two ways:
+   - **🧑 Dashboard (simplest):** your project → **Storage → Create Database → "Upstash for
+     Redis" (Marketplace) → Connect**, then **Connect Project → select `<your-almanac>` →
+     All Environments → Connect.**
+   - **CLI/API (no browser click for the connect — verified):** create the store once in the
+     dashboard (or reuse an existing one), then connect it to the project via the Vercel REST
+     API — the endpoint the dashboard button calls, which the `vercel` CLI does *not* expose
+     (`integration-resource` only disconnects/removes). With your CLI token
+     (`~/Library/Application Support/com.vercel.cli/auth.json`) and `teamId`/`storeId`/`projectId`:
+     `POST https://api.vercel.com/v1/storage/stores/<storeId>/connections?teamId=<team>`
+     with body `{"projectId":"<prj_…>","envVarEnvironments":["production","preview","development"]}`.
+     (Find ids via `GET /v1/storage/stores?teamId=…` and `GET /v9/projects/<name>?teamId=…`.)
+   Either way it **auto-injects `KV_REST_API_URL` + `KV_REST_API_TOKEN`** (+`KV_URL`,`REDIS_URL`,
+   `KV_REST_API_READ_ONLY_TOKEN`). Confirm with `vercel env ls`.
 4. **Set the remaining prod env (CLI).** Generate + set, e.g.:
    `printf '%s' "$(openssl rand -base64 32)" | vercel env add NEXTAUTH_SECRET production`;
    `printf '%s' "<a strong passphrase>" | vercel env add ALMANAC_ACCESS_PASSWORD production`.
