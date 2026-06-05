@@ -5,14 +5,14 @@ reviewers drop pin-anchored comments directly on iframed HTML artifacts (project
 versions), with threaded replies, emoji reactions, resolve, live presence, and a header-gated
 API for AI reviewers.
 
-This repo is **one file that matters**: [`almanac.seed.md`](almanac.seed.md) — a
+This repo is **one file that matters**: [`SEED.md`](SEED.md) — a
 self-contained, one-shot **SEED**: a complete product specification (the *recipe*) with **no
 implementation code**. Hand it to a coding agent; the agent "hydrates" it — building the whole
 Next.js 14 app from scratch until every acceptance journey in the seed's `§16` passes.
 
 ## Use it
 
-**Recommended:** paste `almanac.seed.md` into your Claude Code session (host or container) and say:
+**Recommended:** paste `SEED.md` into your Claude Code session (host or container) and say:
 
 > *Hydrate this seed: build the app it specifies, then run its `## Steps` and `## Verify` until all 27 §16 journeys pass.*
 

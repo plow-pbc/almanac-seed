@@ -2,10 +2,10 @@
 # Hydrate + verify the Almanac seed as a cold stranger, in a throwaway bare node:20-slim.
 # Requires: Docker, and a `claude` CLI authenticated on the host (creds at ~/.claude).
 # Usage:  ./verify/hydrate-and-verify.sh
-# Result: a fresh blind agent builds the whole app from ../almanac.seed.md and runs the
+# Result: a fresh blind agent builds the whole app from ../SEED.md and runs the
 #         seed's own ## Verify; the final line is FINAL_VERIFY=<passed>/27.
 set -euo pipefail
-SEED="$(cd "$(dirname "$0")/.." && pwd)/almanac.seed.md"
+SEED="$(cd "$(dirname "$0")/.." && pwd)/SEED.md"
 WORK="$(mktemp -d)"; cp "$SEED" "$WORK/SEED.md"
 CLAUDE_HOME="$(mktemp -d)"; cp -R "$HOME/.claude/." "$CLAUDE_HOME/" 2>/dev/null || true
 cp "$HOME/.claude.json" "$CLAUDE_HOME.json" 2>/dev/null || true
