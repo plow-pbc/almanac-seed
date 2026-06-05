@@ -1377,7 +1377,8 @@ final report) is automated CLI/API.
 
 ## 14. Done (observable conditions)
 
-Each independently checkable from a fresh shell (KV-less dev mode is fine for most):
+Each independently checkable **against your deployed public instance on real Upstash** (Rule 16 —
+a KV-less local run is a dev sanity step only, never proof of done):
 
 - `npm run build` succeeds; `npm start` serves on **:3210**.
 - Unauthenticated `GET /` ⇒ **redirect to `/login`** (302/307 to a `/login?next=/`).
@@ -1402,37 +1403,35 @@ Each independently checkable from a fresh shell (KV-less dev mode is fine for mo
 
 ## 15. Verify (runnable acceptance harness)
 
-`## Verify` is a script whose **exit code is the truth** (0 = Done). It runs after `## Steps`
-on a **bare host** and must itself guarantee its tooling — do not assume a seedbed:
+> **Rule 16 — acceptance is ON THE PUBLIC DEPLOY (real Upstash).** Every Almanac instance is the
+> **public version: a Vercel deploy backed by a REAL Upstash store.** In-memory / KV-less / offline
+> runs are a **developer sanity step ONLY and prove nothing for "done."** The seed is **done when
+> the §16 suite (J1–J28) passes against YOUR OWN deployed public URL on real Upstash** — the
+> instance you stand up via Step 0 / §13.6 with your own accounts/keys, never a reference or
+> production Almanac.
 
-1. **Preflight (self-installing).** Assert `node -v` ≥ 18.17. Ensure the Playwright browser is
-   present — run `npx playwright install --with-deps chromium` if a launch probe fails (never
-   assume a pre-baked browser). Ensure `ALMANAC_TEST_LOGIN=1` + `NEXTAUTH_SECRET` are in the
-   env/`.env.local`.
-2. **Boot** the built app on `:3210` (KV-less in-memory mode is fine), wait for
-   `curl -sf localhost:3210/login`.
-3. **Sign in without Google:** `GET /api/test-login?email=tester@plow.co` to obtain the
-   `@plow.co` session cookie (Playwright `storageState`/`beforeAll`). No Google creds, no
-   externally minted JWT.
-4. **Assert** the §14 conditions + §16 **J1–J27** via Playwright (`npm run e2e`) against
-   `http://localhost:3210` (KV-less in-memory is fine for these). **Then run §16 J28** — boot once
-   more with `KV_REST_API_*` pointed at a **throwaway real redis-compatible store** (NOT another
-   Almanac instance) and exercise the viewer/reaction hash paths against the **actual `@vercel/kv`
-   client**. Exit code = truth. **J28 is REQUIRED** — the in-memory suite cannot catch the
-   `@vercel/kv` client-contract divergence (`hset`/`hgetall` shapes) that 500s in prod (§2/§17).
+`## Verify` is a script whose **exit code is the truth** (0 = Done):
 
-It must:
-- run from a fresh shell on a host with **nothing pre-installed but the Steps' output**,
-- print enough to debug failures,
-- finish in < 5 min for the core path.
+1. **Preflight (self-installing).** Assert `node -v` ≥ 18.17; ensure the Playwright browser
+   (`npx playwright install --with-deps chromium` if a launch probe fails); secrets present.
+2. **(Dev sanity — OPTIONAL, proves nothing for done.)** You MAY `npm start` on `:3210` in KV-less
+   in-memory mode to confirm the build compiles and serves. This is **not** acceptance and is **no**
+   evidence of done — it only catches gross build breakage early.
+3. **Deploy to the public target (REQUIRED).** Complete §13.6 — `vercel deploy --prod` with a
+   **real Upstash store connected** — to a live `https://<project>.vercel.app`.
+4. **Run the §16 suite (J1–J28) against the DEPLOYED URL on real Upstash.** Drive Playwright against
+   `https://<project>.vercel.app`, signing in with the **passphrase** (§6) — `test-login` is
+   **prod-404**, so it serves only the optional dev sanity step, never acceptance. The viewer/reaction
+   real-KV contract (J28) holds **by construction** here: the live deploy IS a real `@vercel/kv`
+   store. **Exit 0 only when the DEPLOYED public instance passes every journey.**
 
-> **Self-contained — no reference instance.** Verify drives **only the app this seed built**,
-> on `localhost:3210`. It does **NOT** require the production Almanac, any other running
-> instance, or golden screenshots captured from one. Visual fidelity (J23–J27) is asserted
-> against the **absolute values in §9**, not by diffing another app. If any check here needs a
-> second/real instance to pass, that is a seed bug — fix the seed (make §9 carry the value),
-> not the harness. A fresh blind agent on a clean machine with **no Almanac anywhere** must be
-> able to reach exit 0.
+It must print enough to debug failures and finish the deployed-suite run promptly.
+
+> **Self-contained — your OWN instance, no reference app.** Acceptance runs against the public
+> instance **this seed deployed** (your Vercel + real Upstash), **not** the production Almanac, any
+> other running app, or golden screenshots from one. Visual fidelity (J23–J27) is asserted against
+> the **absolute values in §9**, not by diffing another app. A fresh blind agent with **no Almanac
+> anywhere** stands up its own public deploy and reaches exit 0 **against that deploy**.
 
 The reference implementation (`github.com/plow-pbc/almanac`) ships a Playwright suite under
 `tests/e2e/` (`verify-comment-flow`, `verify-resolve`, `verify-draggable-pins`,
@@ -1446,6 +1445,9 @@ authors its own equivalent suite from §16.
 ## 16. Verification journeys (acceptance tests — all must pass)
 
 Each states an action and the observable expected result. Manual or headless (Playwright).
+**Acceptance target (Rule 16): your DEPLOYED public URL on real Upstash** (`https://<project>.vercel.app`,
+§13.6) — not localhost/in-memory, which is a dev sanity step only. J1–J27 are functional/visual; **J28**
+exercises the real `@vercel/kv` viewer/reaction contract (which the deployed instance satisfies by construction).
 
 1. **Auth gate.** Hit `/` with no session. *Expect:* redirect to `/login?next=/`, and `/login`
    renders a **sign-in card** with whatever providers are configured — the **passphrase field**
