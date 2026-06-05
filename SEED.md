@@ -239,10 +239,26 @@ Character traits the rebuild must preserve:
   **middleware** is the first gate.
 - **Persistence**: **Vercel KV** (`@vercel/kv`, a Redis-compatible store) for ALL mutable
   state (comments, replies, reactions, viewers, resolves, project/option/version metadata,
-  display-name overrides, status, anchor caches). **Dev fallback**: when KV env vars are
-  absent, fall back to an **in-memory `Map`** implementing the same `get/set/del/llen/rpush/
-  lrange/lrem/hincrby/hgetall/hset/sismember/sadd/srem` surface, so `next dev` works with no
-  KV provisioned (warn once on stderr; never use the memory store in production).
+  display-name overrides, status, anchor caches). **ONE KV adapter wraps BOTH backends behind
+  the EXACT `@vercel/kv` method contract** — the real client AND the dev in-memory `Map` must be
+  contract-identical (arg shapes AND return shapes), or a build passes Verify in-memory and still
+  **500s in prod**. Pin these client contracts (a real prod-only crash class — §17, and the reason
+  §16 J28 runs against a REAL store):
+  - **`hset(key, { field: value })` — OBJECT form only.** NEVER `hset(key, field, value)` (3-arg):
+    `@vercel/kv` reads the 2nd positional arg as the object, so a string **spreads char-by-char**
+    into hash fields (`{0:'t',1:'e',…}`) — corrupting viewers/reactions.
+  - **`hgetall` return shape.** With `@vercel/kv` **default `automaticDeserialization: true`,
+    `hgetall` returns an OBJECT `{ field: value }`.** If you set `automaticDeserialization: false`,
+    `hgetall` returns a **FLAT ARRAY `[field, value, field, value, …]`** — `Object.entries` on it
+    yields garbage keys. **Prefer default deserialization;** if you disable it, the adapter MUST
+    reassemble the flat array into an object (and the in-memory `Map` must return the same object
+    shape). Likewise `smembers` → array, `sismember` → `0|1` (coerce to boolean).
+  - **Dev fallback**: when KV env vars are absent, the in-memory `Map` adapter implements the SAME
+    contracts above, so `next dev` and prod behave identically. Warn once on stderr; never use the
+    memory store in production.
+  - **Defensive reads (REQUIRED)**: every hash read that feeds an identity field (viewer email,
+    author email) MUST coerce/validate before use — a malformed/garbage row is **skipped**, never
+    `undefined.toLowerCase()`'d into a 500. (`allViewers`/`readIdentity` guard.)
 - **Seed corpus on disk**: HTML artifacts live under `cookoff-seeds/<projectDir>/<file>.html`
   at the **repo root** (`SEEDS_ROOT = <cwd>/cookoff-seeds`). These are **auto-discovered**
   (§4). The repo ships a corpus; the seed treats `cookoff-seeds/` as an input.
@@ -1361,7 +1377,8 @@ final report) is automated CLI/API.
 
 ## 14. Done (observable conditions)
 
-Each independently checkable from a fresh shell (KV-less dev mode is fine for most):
+Each independently checkable **against your deployed public instance on real Upstash** (Rule 16 —
+a KV-less local run is a dev sanity step only, never proof of done):
 
 - `npm run build` succeeds; `npm start` serves on **:3210**.
 - Unauthenticated `GET /` ⇒ **redirect to `/login`** (302/307 to a `/login?next=/`).
@@ -1386,33 +1403,35 @@ Each independently checkable from a fresh shell (KV-less dev mode is fine for mo
 
 ## 15. Verify (runnable acceptance harness)
 
-`## Verify` is a script whose **exit code is the truth** (0 = Done). It runs after `## Steps`
-on a **bare host** and must itself guarantee its tooling — do not assume a seedbed:
+> **Rule 16 — acceptance is ON THE PUBLIC DEPLOY (real Upstash).** Every Almanac instance is the
+> **public version: a Vercel deploy backed by a REAL Upstash store.** In-memory / KV-less / offline
+> runs are a **developer sanity step ONLY and prove nothing for "done."** The seed is **done when
+> the §16 suite (J1–J28) passes against YOUR OWN deployed public URL on real Upstash** — the
+> instance you stand up via Step 0 / §13.6 with your own accounts/keys, never a reference or
+> production Almanac.
 
-1. **Preflight (self-installing).** Assert `node -v` ≥ 18.17. Ensure the Playwright browser is
-   present — run `npx playwright install --with-deps chromium` if a launch probe fails (never
-   assume a pre-baked browser). Ensure `ALMANAC_TEST_LOGIN=1` + `NEXTAUTH_SECRET` are in the
-   env/`.env.local`.
-2. **Boot** the built app on `:3210` (KV-less in-memory mode is fine), wait for
-   `curl -sf localhost:3210/login`.
-3. **Sign in without Google:** `GET /api/test-login?email=tester@plow.co` to obtain the
-   `@plow.co` session cookie (Playwright `storageState`/`beforeAll`). No Google creds, no
-   externally minted JWT.
-4. **Assert** the §14 conditions + the §16 journeys via Playwright (`npm run e2e`) against
-   `http://localhost:3210` only. Exit code = truth.
+`## Verify` is a script whose **exit code is the truth** (0 = Done):
 
-It must:
-- run from a fresh shell on a host with **nothing pre-installed but the Steps' output**,
-- print enough to debug failures,
-- finish in < 5 min for the core path.
+1. **Preflight (self-installing).** Assert `node -v` ≥ 18.17; ensure the Playwright browser
+   (`npx playwright install --with-deps chromium` if a launch probe fails); secrets present.
+2. **(Dev sanity — OPTIONAL, proves nothing for done.)** You MAY `npm start` on `:3210` in KV-less
+   in-memory mode to confirm the build compiles and serves. This is **not** acceptance and is **no**
+   evidence of done — it only catches gross build breakage early.
+3. **Deploy to the public target (REQUIRED).** Complete §13.6 — `vercel deploy --prod` with a
+   **real Upstash store connected** — to a live `https://<project>.vercel.app`.
+4. **Run the §16 suite (J1–J28) against the DEPLOYED URL on real Upstash.** Drive Playwright against
+   `https://<project>.vercel.app`, signing in with the **passphrase** (§6) — `test-login` is
+   **prod-404**, so it serves only the optional dev sanity step, never acceptance. The viewer/reaction
+   real-KV contract (J28) holds **by construction** here: the live deploy IS a real `@vercel/kv`
+   store. **Exit 0 only when the DEPLOYED public instance passes every journey.**
 
-> **Self-contained — no reference instance.** Verify drives **only the app this seed built**,
-> on `localhost:3210`. It does **NOT** require the production Almanac, any other running
-> instance, or golden screenshots captured from one. Visual fidelity (J23–J27) is asserted
-> against the **absolute values in §9**, not by diffing another app. If any check here needs a
-> second/real instance to pass, that is a seed bug — fix the seed (make §9 carry the value),
-> not the harness. A fresh blind agent on a clean machine with **no Almanac anywhere** must be
-> able to reach exit 0.
+It must print enough to debug failures and finish the deployed-suite run promptly.
+
+> **Self-contained — your OWN instance, no reference app.** Acceptance runs against the public
+> instance **this seed deployed** (your Vercel + real Upstash), **not** the production Almanac, any
+> other running app, or golden screenshots from one. Visual fidelity (J23–J27) is asserted against
+> the **absolute values in §9**, not by diffing another app. A fresh blind agent with **no Almanac
+> anywhere** stands up its own public deploy and reaches exit 0 **against that deploy**.
 
 The reference implementation (`github.com/plow-pbc/almanac`) ships a Playwright suite under
 `tests/e2e/` (`verify-comment-flow`, `verify-resolve`, `verify-draggable-pins`,
@@ -1426,6 +1445,9 @@ authors its own equivalent suite from §16.
 ## 16. Verification journeys (acceptance tests — all must pass)
 
 Each states an action and the observable expected result. Manual or headless (Playwright).
+**Acceptance target (Rule 16): your DEPLOYED public URL on real Upstash** (`https://<project>.vercel.app`,
+§13.6) — not localhost/in-memory, which is a dev sanity step only. J1–J27 are functional/visual; **J28**
+exercises the real `@vercel/kv` viewer/reaction contract (which the deployed instance satisfies by construction).
 
 1. **Auth gate.** Hit `/` with no session. *Expect:* redirect to `/login?next=/`, and `/login`
    renders a **sign-in card** with whatever providers are configured — the **passphrase field**
@@ -1574,6 +1596,24 @@ asserting the build against those literals IS the fidelity check.
     `toHaveScreenshot` baselines to catch unintended self-regressions between commits. That is
     explicitly **not** part of passing this seed and needs **no** reference instance — fidelity
     is established by the assertions above against §9, period.
+28. **Real-KV contract (prod-shape gate — runs against a REAL store, NOT in-memory).** *J1–J27
+    run KV-less in-memory and therefore CANNOT catch dev↔prod `@vercel/kv` client-contract
+    divergence (the `hset`/`hgetall` arg/return shapes in §2) — a build can pass 27/27 in-memory
+    and still 500 in prod. This journey is the only one that exercises the **real client**, so it
+    is **REQUIRED for done.*** Boot the built app with `KV_REST_API_URL`/`KV_REST_API_TOKEN`
+    pointed at a **real redis-compatible store** (a throwaway local `redis`/Upstash via the actual
+    `@vercel/kv` client — not the in-memory `Map`). Then drive the hash paths that broke in prod:
+    - **Viewer round-trip.** Open an uploaded artifact's version page (records a viewer via
+      `hset(versionViewers, { <email>: <viewer> })`), then re-load it so the server reads viewers
+      via `hgetall`. *Expect:* HTTP **200, no 500**; the ViewerStack shows the real viewer; the
+      stored email round-trips **intact** — not spread char-by-char (3-arg `hset`), not garbage
+      keys from a flat-array `hgetall` (deserialization off).
+    - **Reaction round-trip.** React 🔥 on a comment (`hincrby` + `sadd`), reload. *Expect:*
+      count = 1, `data-mine` set; `hgetall(reactions)` returns the correct `{ emoji: count }`
+      object; `sismember` resolves the caller as a boolean.
+    *Expect:* every read returns the correct **object** shape and **no `TypeError … toLowerCase`**.
+    A build that passes J1–J27 in-memory but fails J28 on a real store has the exact prod-only
+    crash class §17 documents.
 
 ---
 
