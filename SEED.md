@@ -239,10 +239,26 @@ Character traits the rebuild must preserve:
   **middleware** is the first gate.
 - **Persistence**: **Vercel KV** (`@vercel/kv`, a Redis-compatible store) for ALL mutable
   state (comments, replies, reactions, viewers, resolves, project/option/version metadata,
-  display-name overrides, status, anchor caches). **Dev fallback**: when KV env vars are
-  absent, fall back to an **in-memory `Map`** implementing the same `get/set/del/llen/rpush/
-  lrange/lrem/hincrby/hgetall/hset/sismember/sadd/srem` surface, so `next dev` works with no
-  KV provisioned (warn once on stderr; never use the memory store in production).
+  display-name overrides, status, anchor caches). **ONE KV adapter wraps BOTH backends behind
+  the EXACT `@vercel/kv` method contract** — the real client AND the dev in-memory `Map` must be
+  contract-identical (arg shapes AND return shapes), or a build passes Verify in-memory and still
+  **500s in prod**. Pin these client contracts (a real prod-only crash class — §17, and the reason
+  §16 J28 runs against a REAL store):
+  - **`hset(key, { field: value })` — OBJECT form only.** NEVER `hset(key, field, value)` (3-arg):
+    `@vercel/kv` reads the 2nd positional arg as the object, so a string **spreads char-by-char**
+    into hash fields (`{0:'t',1:'e',…}`) — corrupting viewers/reactions.
+  - **`hgetall` return shape.** With `@vercel/kv` **default `automaticDeserialization: true`,
+    `hgetall` returns an OBJECT `{ field: value }`.** If you set `automaticDeserialization: false`,
+    `hgetall` returns a **FLAT ARRAY `[field, value, field, value, …]`** — `Object.entries` on it
+    yields garbage keys. **Prefer default deserialization;** if you disable it, the adapter MUST
+    reassemble the flat array into an object (and the in-memory `Map` must return the same object
+    shape). Likewise `smembers` → array, `sismember` → `0|1` (coerce to boolean).
+  - **Dev fallback**: when KV env vars are absent, the in-memory `Map` adapter implements the SAME
+    contracts above, so `next dev` and prod behave identically. Warn once on stderr; never use the
+    memory store in production.
+  - **Defensive reads (REQUIRED)**: every hash read that feeds an identity field (viewer email,
+    author email) MUST coerce/validate before use — a malformed/garbage row is **skipped**, never
+    `undefined.toLowerCase()`'d into a 500. (`allViewers`/`readIdentity` guard.)
 - **Seed corpus on disk**: HTML artifacts live under `cookoff-seeds/<projectDir>/<file>.html`
   at the **repo root** (`SEEDS_ROOT = <cwd>/cookoff-seeds`). These are **auto-discovered**
   (§4). The repo ships a corpus; the seed treats `cookoff-seeds/` as an input.
@@ -1398,8 +1414,12 @@ on a **bare host** and must itself guarantee its tooling — do not assume a see
 3. **Sign in without Google:** `GET /api/test-login?email=tester@plow.co` to obtain the
    `@plow.co` session cookie (Playwright `storageState`/`beforeAll`). No Google creds, no
    externally minted JWT.
-4. **Assert** the §14 conditions + the §16 journeys via Playwright (`npm run e2e`) against
-   `http://localhost:3210` only. Exit code = truth.
+4. **Assert** the §14 conditions + §16 **J1–J27** via Playwright (`npm run e2e`) against
+   `http://localhost:3210` (KV-less in-memory is fine for these). **Then run §16 J28** — boot once
+   more with `KV_REST_API_*` pointed at a **throwaway real redis-compatible store** (NOT another
+   Almanac instance) and exercise the viewer/reaction hash paths against the **actual `@vercel/kv`
+   client**. Exit code = truth. **J28 is REQUIRED** — the in-memory suite cannot catch the
+   `@vercel/kv` client-contract divergence (`hset`/`hgetall` shapes) that 500s in prod (§2/§17).
 
 It must:
 - run from a fresh shell on a host with **nothing pre-installed but the Steps' output**,
@@ -1574,6 +1594,24 @@ asserting the build against those literals IS the fidelity check.
     `toHaveScreenshot` baselines to catch unintended self-regressions between commits. That is
     explicitly **not** part of passing this seed and needs **no** reference instance — fidelity
     is established by the assertions above against §9, period.
+28. **Real-KV contract (prod-shape gate — runs against a REAL store, NOT in-memory).** *J1–J27
+    run KV-less in-memory and therefore CANNOT catch dev↔prod `@vercel/kv` client-contract
+    divergence (the `hset`/`hgetall` arg/return shapes in §2) — a build can pass 27/27 in-memory
+    and still 500 in prod. This journey is the only one that exercises the **real client**, so it
+    is **REQUIRED for done.*** Boot the built app with `KV_REST_API_URL`/`KV_REST_API_TOKEN`
+    pointed at a **real redis-compatible store** (a throwaway local `redis`/Upstash via the actual
+    `@vercel/kv` client — not the in-memory `Map`). Then drive the hash paths that broke in prod:
+    - **Viewer round-trip.** Open an uploaded artifact's version page (records a viewer via
+      `hset(versionViewers, { <email>: <viewer> })`), then re-load it so the server reads viewers
+      via `hgetall`. *Expect:* HTTP **200, no 500**; the ViewerStack shows the real viewer; the
+      stored email round-trips **intact** — not spread char-by-char (3-arg `hset`), not garbage
+      keys from a flat-array `hgetall` (deserialization off).
+    - **Reaction round-trip.** React 🔥 on a comment (`hincrby` + `sadd`), reload. *Expect:*
+      count = 1, `data-mine` set; `hgetall(reactions)` returns the correct `{ emoji: count }`
+      object; `sismember` resolves the caller as a boolean.
+    *Expect:* every read returns the correct **object** shape and **no `TypeError … toLowerCase`**.
+    A build that passes J1–J27 in-memory but fails J28 on a real store has the exact prod-only
+    crash class §17 documents.
 
 ---
 
